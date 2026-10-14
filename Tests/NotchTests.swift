@@ -1031,7 +1031,32 @@ enum NotchTests {
         }
     }
 
+    private static func shortcutContracts(_ suite: TestSuite) {
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.notchShortcutEnabled] as? Bool == false,
+               "the island shortcut ships off, so no key is taken until the user asks")
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.notchShortcut] as? String
+                == "control+option+command:34",
+               "the default island shortcut is control option command I")
+        suite.expect(!GlobalShortcutRole.allCases.contains { $0 != .notch && $0.defaultShortcut == .notchDefault },
+               "the default island shortcut is not another feature's default")
+        func active(_ keys: Set<String>) -> Bool {
+            GlobalShortcutRole.activeRoles(isOn: { keys.contains($0) }).contains(.notch)
+        }
+        suite.expect(active([DefaultsKey.notchEnabled, DefaultsKey.notchShortcutEnabled])
+                && !active([DefaultsKey.notchShortcutEnabled])
+                && !active([DefaultsKey.notchEnabled]),
+               "the island shortcut is live only while both the island and its shortcut are on")
+        suite.expect(!GlobalShortcutRole.activeRoles(isOn: { _ in true },
+                                                     isAvailable: { $0 != .notch }).contains(.notch),
+               "an island removed in the hub does not reserve its shortcut")
+        let backupKeys = SettingsBackupSupport.exportKeys()
+        suite.expect(backupKeys.contains(DefaultsKey.notchShortcut)
+                && backupKeys.contains(DefaultsKey.notchShortcutEnabled),
+               "the island shortcut travels with the settings backup")
+    }
+
     static func run(_ suite: TestSuite) {
+        shortcutContracts(suite)
         let previewStrip: CGFloat = 37
         suite.expect(NotchTranslucentTint.opacity(atDepth: previewStrip, stripHeight: previewStrip,
                                                   openness: 1, increasedContrast: false) == 1
