@@ -61,6 +61,16 @@ enum NotchDestinationContract {
         var revealing: String?
     }
     enum NotchCalendarService { static var shared = CountdownCalendar() }
+    final class Hotkey {
+        var onPress: (() -> Void)?
+        var refuses = false
+        var requests: [Bool] = []
+        func sync(enabled: Bool, shortcut: GlobalShortcut, storageKey: String) -> Bool {
+            requests.append(enabled)
+            return !(enabled && refuses)
+        }
+    }
+    enum ShortcutCapture { static var isCapturing = false }
 
     class State {
         var acceptsUserInteraction = true
@@ -110,6 +120,11 @@ enum NotchDestinationContract {
         func syncVisibleConsumers() { requestedDetail = selectedMetric }
         func provideHapticFeedback() {}
         func endCaptureControls() {}
+        let hotkey = Hotkey()
+        var shortcutFailureWrites = 0
+        var shortcutRegistrationFailed = false { didSet { shortcutFailureWrites += 1 } }
+        var captureControlsExpansions = 0
+        func expandCaptureControls() { captureControlsExpansions += 1 }
         func clearCapture() { captureControlsCancel = nil; captureClose = nil }
         func tearDownPresentation() { expanded = false; presentationTearDowns += 1 }
     }
@@ -233,6 +248,7 @@ enum NotchDestinationContract {
         suite.expect(launcher.selectedIndex == nil, "an empty Tools module leaves keyboard activation without a target")
         sessionContracts(suite)
         lockScreenContracts(defaults: defaults, suite: suite)
+        shortcutContracts(defaults: defaults, suite: suite)
     }
 
     /// Escape steps back through what the island shows, then closes it.
@@ -716,5 +732,54 @@ enum NotchDestinationContract {
         service.updateSession { $0.onConsole = true }
         suite.expect(!timer.running && service.presentationSyncs == 2,
                "late session notifications cannot restart a stopped island or timer")
+    }
+
+    /// Like a click on the closed island, the shortcut expands the capture
+    /// controls while they are up and otherwise toggles the island. It holds its
+    /// key only while it is on and no other shortcut is recording.
+    private static func shortcutContracts(defaults: UserDefaults, suite: TestSuite) {
+        defer {
+            ShortcutCapture.isCapturing = false
+            defaults.set(false, forKey: DefaultsKey.notchShortcutEnabled)
+        }
+        func pressed(captureControls: Bool = false, interactive: Bool = true, presses: Int = 1) -> Service {
+            let service = Service()
+            service.installHotkey()
+            if captureControls { service.captureControls = NSObject() }
+            service.acceptsUserInteraction = interactive
+            for _ in 0..<presses { service.hotkey.onPress?() }
+            return service
+        }
+        let capture = pressed(captureControls: true)
+        suite.expect(capture.captureControlsExpansions == 1 && !capture.expanded,
+                     "the island shortcut expands the capture controls instead of opening the island behind them")
+        let away = [pressed(interactive: false), pressed(captureControls: true, interactive: false)]
+        suite.expect(away.allSatisfy { !$0.expanded && $0.captureControlsExpansions == 0 },
+                     "the island shortcut does nothing while the island does not accept user interaction")
+        suite.expect(pressed().expanded && !pressed(presses: 2).expanded,
+                     "the island shortcut opens the island and a second press closes it")
+
+        let registration = Service()
+        defaults.set(true, forKey: DefaultsKey.notchShortcutEnabled)
+        registration.syncShortcut()
+        ShortcutCapture.isCapturing = true
+        registration.syncShortcut()
+        ShortcutCapture.isCapturing = false
+        registration.syncShortcut()
+        defaults.set(false, forKey: DefaultsKey.notchShortcutEnabled)
+        registration.syncShortcut()
+        suite.expect(registration.hotkey.requests == [true, false, true, false],
+                     "the island shortcut lets its key go while another shortcut is recording and while it is off")
+        let refused = Service()
+        refused.hotkey.refuses = true
+        defaults.set(true, forKey: DefaultsKey.notchShortcutEnabled)
+        refused.syncShortcut()
+        refused.syncShortcut()
+        let failed = refused.shortcutRegistrationFailed
+        defaults.set(false, forKey: DefaultsKey.notchShortcutEnabled)
+        refused.syncShortcut()
+        refused.syncShortcut()
+        suite.expect(failed && !refused.shortcutRegistrationFailed && refused.shortcutFailureWrites == 2,
+                     "a refused island shortcut reports the failure and its end once each, not on every sync")
     }
 }

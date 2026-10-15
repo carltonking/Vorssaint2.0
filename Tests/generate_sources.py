@@ -1059,6 +1059,11 @@ def main():
                              if line.startswith("    case "))
     menu_metric_cases = "\n".join(line for line in declaration(renderer, "enum MenuBarMetric:").splitlines()
                                   if line.startswith("    case "))
+    # toggle() fits on one line, which declaration() cannot bound.
+    toggle = [line for line in (ROOT / notch).read_text().splitlines(keepends=True)
+              if line.startswith("    func toggle() {")]
+    if len(toggle) != 1 or not toggle[0].rstrip().endswith("}"):
+        raise ValueError("Expected a one-line toggle() in NotchService")
     write("NotchDestinations.swift", "import Foundation\n\nextension NotchDestinationContract {\n"
           + "enum MetricDetailKind: String {\n" + metric_cases + "\n}\n"
           + "enum MenuBarMetric: String, CaseIterable {\n" + menu_metric_cases + "\n"
@@ -1089,6 +1094,11 @@ def main():
           + declaration(notch, "    private func updateSession(").replace("private func", "func", 1)
               .replace("AppFeature.mixer.isAvailable", "AppFeature.mixer.isAvailable(in: ReviewDefaults.current)")
               .replace("NotchLockScreenSupport.playsSounds()", "NotchLockScreenSupport.playsSounds(in: ReviewDefaults.current)")
+          # The press handler the initializer installs, run on demand.
+          + declaration(notch, "    private init() {").replace("    private init()", "    func installHotkey()", 1)
+          + declaration(notch, "    func toggleFromShortcut()") + toggle[0]
+          + declaration(notch, "    private func syncShortcut()").replace("private func", "func", 1)
+              .replace("NotchSupport.holdsShortcut()", "NotchSupport.holdsShortcut(in: ReviewDefaults.current)")
           + "}\n}\n")
     write("ShelfDropRouting.swift", "import AppKit\n\nextension ShelfDropRoutingContract {\n"
           + declaration(canvas, "struct NotchFileDropActions {")

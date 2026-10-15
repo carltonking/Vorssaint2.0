@@ -1053,6 +1053,30 @@ enum NotchTests {
         suite.expect(backupKeys.contains(DefaultsKey.notchShortcut)
                 && backupKeys.contains(DefaultsKey.notchShortcutEnabled),
                "the island shortcut travels with the settings backup")
+        let domain = "com.vorssaint.tests.notch-shortcut-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        func holds(installed: Bool = true, island: Bool = true, shortcut: Bool = true) -> Bool {
+            defaults.set(installed, forKey: AppFeature.notch.availabilityKey)
+            defaults.set(island, forKey: DefaultsKey.notchEnabled)
+            defaults.set(shortcut, forKey: DefaultsKey.notchShortcutEnabled)
+            return NotchSupport.holdsShortcut(in: defaults)
+        }
+        suite.expect(holds(), "the island shortcut holds its key while the island and its shortcut are on")
+        suite.expect(!holds(island: false), "the island shortcut is not wanted while the island is off")
+        suite.expect(!holds(installed: false), "the island shortcut is not wanted while the island is removed in the hub")
+        suite.expect(!holds(shortcut: false), "turning the island shortcut off releases its key")
+        // The service is a singleton holding a real Carbon hotkey, so its
+        // wiring is checked in the source, like the launch hooks below.
+        let service = (try? String(contentsOfFile: "Sources/Vorssaint/Services/Notch/NotchService.swift",
+                                   encoding: .utf8)) ?? ""
+        suite.expect(service.contains("hotkey.onPress = { [weak self] in self?.toggleFromShortcut() }"),
+               "the island shortcut answers like a click on the island")
+        suite.expect(service.contains("guard NotchSupport.isEnabled() else { stop(); return }")
+                && service.contains("        syncShortcut()\n        if !NotchTimerSupport.isEnabled()"),
+               "every preference sync of a running island registers or releases its shortcut")
+        suite.expect(service.contains("preferenceSyncWork?.cancel(); preferenceSyncWork = nil\n        hotkey.unregister()"),
+               "stopping the island releases its shortcut")
     }
 
     static func run(_ suite: TestSuite) {

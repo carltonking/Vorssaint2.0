@@ -620,13 +620,15 @@ struct NotchSettings: View {
                 }
                 switchRow("keyboard", l10n.s.quickToolShortcutToggle, isOn: $shortcutEnabled)
                 if shortcutEnabled {
-                    ShortcutPreferenceRow(role: .notch, symbolName: "command") {
+                    ShortcutPreferenceRow(role: .notch) {
                         NotchService.shared.syncWithPreferences()
                     }
+                    .padding(.leading, settingsRowTextInset)
                     if notch.shortcutRegistrationFailed {
                         Text(l10n.s.shortcutUnavailable)
                             .font(.caption)
                             .foregroundStyle(.orange)
+                            .padding(.leading, settingsRowTextInset)
                     }
                 }
                 SettingsFeatureSwitchRow(symbol: "hand.draw", title: FeatureStrings.notchGestures(l10n.language).title,

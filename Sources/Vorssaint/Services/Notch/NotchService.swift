@@ -398,7 +398,7 @@ final class NotchService: ObservableObject {
     private static let pointerFollowDelay: TimeInterval = 0.2
 
     private init() {
-        hotkey.onPress = { [weak self] in self?.toggle() }
+        hotkey.onPress = { [weak self] in self?.toggleFromShortcut() }
     }
 
     private var hiddenUntilHover: Bool {
@@ -1156,14 +1156,26 @@ final class NotchService: ObservableObject {
         if AppFeature.brightness.isAvailable { BrightnessService.shared.syncWithPreferences() }
     }
 
+    /// Like a click on the closed island, the shortcut expands the capture
+    /// controls while they are up and otherwise toggles the island. The controls
+    /// cover the open page and hold collapsing off, so a plain toggle there
+    /// would mark the island open behind them.
+    func toggleFromShortcut() {
+        guard acceptsUserInteraction else { return }
+        if captureControls != nil { expandCaptureControls(); return }
+        toggle()
+    }
+
     /// Registered whenever the island runs, including while it is away, so the
     /// shortcut's state does not flicker with the lid or the lock screen;
-    /// `open` already refuses while the island is suspended.
+    /// `open` already refuses while the island is suspended. Any defaults write
+    /// syncs again, so it also waits while another shortcut field is recording,
+    /// as the window layout keys do.
     private func syncShortcut() {
-        let enabled = UserDefaults.standard.bool(forKey: DefaultsKey.notchShortcutEnabled)
         let shortcut = GlobalShortcut.saved(for: DefaultsKey.notchShortcut, fallback: .notchDefault)
-        shortcutRegistrationFailed = !hotkey.sync(enabled: enabled, shortcut: shortcut,
-                                                  storageKey: DefaultsKey.notchShortcut)
+        let failed = !hotkey.sync(enabled: NotchSupport.holdsShortcut() && !ShortcutCapture.isCapturing,
+                                  shortcut: shortcut, storageKey: DefaultsKey.notchShortcut)
+        if failed != shortcutRegistrationFailed { shortcutRegistrationFailed = failed }
     }
 
     private func refreshModules() {
