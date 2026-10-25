@@ -117,6 +117,12 @@ struct NotchHermesChatView: View {
             } else {
                 opening
             }
+            ForEach(chat.approvals) { approval in
+                NotchAgentApprovalCard(approval: approval, text: text,
+                                       busy: chat.answering.contains(approval.id)) { choice in
+                    chat.answer(approval, choice)
+                }
+            }
             composer
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -410,5 +416,65 @@ struct VertusMark: Shape {
         path.addLines([top, lowerLeft, lowerRight])
         path.closeSubpath()
         return path
+    }
+}
+
+/// An action the agent is holding until someone says yes: what it wants to
+/// do, the command when it adds something, and the answers it accepts. The
+/// one-time yes is the prominent answer; a broader yes takes a deliberate
+/// reach to the side, and no is always one tap away.
+private struct NotchAgentApprovalCard: View {
+    let approval: NotchAgentApproval
+    let text: NotchHermesChatStrings
+    let busy: Bool
+    let answer: (NotchAgentApproval.Choice) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(text.approvalTitle, systemImage: "hand.raised.fill")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.orange)
+            Text(approval.headline)
+                .font(.system(size: 12))
+                .foregroundStyle(.white.opacity(0.9))
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+            if let detail = approval.detail {
+                Text(detail)
+                    .font(.system(size: 10.5, design: .monospaced))
+                    .foregroundStyle(.white.opacity(0.6))
+                    .lineLimit(3)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 4) { buttons }
+                VStack(alignment: .leading, spacing: 2) { buttons }
+            }
+            .disabled(busy)
+            .opacity(busy ? 0.5 : 1)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.orange.opacity(0.1), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("\(text.approvalTitle): \(approval.headline)")
+    }
+
+    @ViewBuilder private var buttons: some View {
+        if approval.choices.contains(.deny) {
+            NotchPillButton(title: text.deny) { answer(.deny) }
+        }
+        if approval.choices.contains(.once) {
+            NotchPillButton(title: text.allowOnce, prominent: true) { answer(.once) }
+        }
+        if approval.choices.contains(.session) {
+            NotchPillButton(title: text.allowSession) { answer(.session) }
+        }
+        if approval.choices.contains(.always) {
+            NotchPillButton(title: text.allowAlways) { answer(.always) }
+        }
     }
 }

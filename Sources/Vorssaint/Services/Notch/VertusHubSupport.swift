@@ -68,8 +68,27 @@ enum VertusHubSupport {
         return request
     }
 
+    /// The agent's live stream, every run included: how an approval asked
+    /// by a turn that started elsewhere (a routine, the terminal) still
+    /// reaches the island.
+    static func watch(token: String) -> URLRequest {
+        var request = request("api/events", token: token,
+                              query: [URLQueryItem(name: "agent_id", value: agentID)])
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        return request
+    }
+
     static func cancel(run: String, token: String) -> URLRequest {
         request("api/runs/\(run)/cancel", token: token, method: "POST", body: [:])
+    }
+
+    /// Answers an approval the agent is waiting on. The hub credits the
+    /// decision to the client named in `X-Vertus-Client`.
+    static func answer(_ approval: String, choice: NotchAgentApproval.Choice, token: String) -> URLRequest {
+        var request = request("api/approvals/\(approval)", token: token, method: "POST",
+                              body: ["choice": choice.rawValue])
+        request.setValue("island", forHTTPHeaderField: "X-Vertus-Client")
+        return request
     }
 
     // MARK: Responses
@@ -106,6 +125,10 @@ enum VertusHubSupport {
         case done
         case cancelled
         case error(String)
+        /// The agent stopped and waits for a yes before it acts.
+        case approval(NotchAgentApproval)
+        /// An approval was answered (here or anywhere else) or withdrawn.
+        case approvalSettled(String, NotchAgentApproval.Outcome)
         /// Status the page does not show: "thinking…", memory writes, other
         /// runs' traffic.
         case ignored
@@ -131,13 +154,14 @@ enum VertusHubSupport {
     }
 
     /// One server-sent line as an event. Comments, blank separators and
-    /// fields other than `data` mean nothing here.
-    static func event(line: String, run: String) -> Event? {
+    /// fields other than `data` mean nothing here. With a `run`, another
+    /// run's events are ignored; without one, every run's are read.
+    static func event(line: String, run: String?) -> Event? {
         guard line.hasPrefix("data:") else { return nil }
         let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
         guard let data = payload.data(using: .utf8),
               let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if let owner = object["run_id"] as? String, !owner.isEmpty, owner != run { return .ignored }
+        if let run, let owner = object["run_id"] as? String, !owner.isEmpty, owner != run { return .ignored }
         switch object["type"] as? String {
         case "text":
             let words = object["text"] as? String ?? ""
@@ -146,6 +170,17 @@ enum VertusHubSupport {
             return toolName(object["text"] as? String ?? "").map(Event.tool) ?? .ignored
         case "done": return .done
         case "cancelled": return .cancelled
+        case "approval_request":
+            guard let id = object["approval_id"] as? String, !id.isEmpty else { return .ignored }
+            let choices = (object["choices"] as? [String] ?? []).compactMap(NotchAgentApproval.Choice.init)
+            return .approval(NotchAgentApproval(
+                id: id,
+                description: object["description"] as? String ?? "",
+                command: object["command"] as? String ?? "",
+                choices: choices.isEmpty ? [.once, .deny] : choices))
+        case "approval_resolved":
+            guard let id = object["approval_id"] as? String, !id.isEmpty else { return .ignored }
+            return .approvalSettled(id, NotchAgentApproval.Outcome(decision: object["decision"] as? String))
         case "error":
             let reason = (object["message"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             return .error(reason ?? "VERTUS did not answer.")
@@ -162,5 +197,56 @@ enum VertusHubSupport {
             .trimmingCharacters(in: CharacterSet(charactersIn: "…. "))
         guard !name.isEmpty, name != "tools" else { return nil }
         return name
+    }
+}
+
+/// One action the agent will not take without a yes: what it wants to do, in
+/// the engine's words, and the answers it accepts.
+struct NotchAgentApproval: Equatable, Identifiable {
+    enum Choice: String, CaseIterable {
+        /// This one action.
+        case once
+        /// This kind of action for the rest of the conversation.
+        case session
+        /// This kind of action from now on.
+        case always
+        case deny
+    }
+
+    enum Outcome: Equatable {
+        case allowed
+        case denied
+        /// Nobody answered in time, or the turn ended first; the engine
+        /// failed the action closed.
+        case expired
+
+        init(decision: String?) {
+            switch decision {
+            case "once", "session", "always": self = .allowed
+            case "deny": self = .denied
+            default: self = .expired
+            }
+        }
+    }
+
+    let id: String
+    let description: String
+    let command: String
+    let choices: [Choice]
+
+    /// What the card says: the engine's description, which for VERTUS's own
+    /// rules already names the command ("VERTUS wants to delete files: rm …").
+    var headline: String {
+        let words = description.trimmingCharacters(in: .whitespacesAndNewlines)
+        return words.isEmpty ? command : words
+    }
+
+    /// The command shown under the headline, when it adds something: a rule
+    /// label such as "<terminal> (plugin approval rule)" or a repeat of the
+    /// headline does not.
+    var detail: String? {
+        let command = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !command.isEmpty, !command.hasPrefix("<"), !headline.contains(command) else { return nil }
+        return command
     }
 }

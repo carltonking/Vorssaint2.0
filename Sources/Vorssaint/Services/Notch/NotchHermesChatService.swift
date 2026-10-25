@@ -49,6 +49,11 @@ final class NotchHermesChatService: ObservableObject {
     /// Counts replies that finished, so the companion on the page can cheer
     /// each one as it lands.
     @Published private(set) var completedReplies = 0
+    /// Actions the agent will not take without a yes, oldest first.
+    @Published private(set) var approvals: [NotchAgentApproval] = []
+    /// Approvals answered here whose settling the hub has not reported yet;
+    /// their buttons stay disabled so a double tap sends one answer.
+    @Published private(set) var answering: Set<String> = []
     @Published private(set) var agentName: String?
     @Published private(set) var modelName: String?
 
@@ -98,6 +103,8 @@ final class NotchHermesChatService: ObservableObject {
         if !reply.isEmpty { reply = "" }
         if !thinking.isEmpty { thinking = "" }
         if working { working = false }
+        if !approvals.isEmpty { approvals = [] }
+        if !answering.isEmpty { answering = [] }
         if agentName != nil { agentName = nil }
         if modelName != nil { modelName = nil }
     }
@@ -190,6 +197,14 @@ final class NotchHermesChatService: ObservableObject {
         client?.cancel()
     }
 
+    /// Answers an approval card. The card stays, disabled, until the hub
+    /// reports the approval settled.
+    func answer(_ approval: NotchAgentApproval, _ choice: NotchAgentApproval.Choice) {
+        guard approvals.contains(where: { $0.id == approval.id }), !answering.contains(approval.id) else { return }
+        answering.insert(approval.id)
+        client?.answer(approval.id, choice: choice)
+    }
+
     /// Empties the transcript without ending the session: Hermes keeps the
     /// conversation on its side, as clearing a terminal would not.
     func clear() {
@@ -224,6 +239,18 @@ final class NotchHermesChatService: ObservableObject {
         case .refused(let subject):
             let line = subject.map { text.refusedCommandLine($0) } ?? text.refusedCommand
             append(NotchHermesChatMessage(role: .note, text: line))
+        case .approval(let approval):
+            guard !approvals.contains(where: { $0.id == approval.id }) else { return }
+            // What the agent was saying before it stopped to ask stays above
+            // the card, in the order it happened.
+            commitReply()
+            approvals.append(approval)
+            requestAttention()
+        case .approvalSettled(let id, let outcome):
+            answering.remove(id)
+            guard approvals.contains(where: { $0.id == id }) else { return }
+            approvals.removeAll { $0.id == id }
+            append(NotchHermesChatMessage(role: .note, text: line(for: outcome)))
         case .finished(let stop):
             finish(stop)
         case .turnFailed(let reason):
@@ -239,6 +266,11 @@ final class NotchHermesChatService: ObservableObject {
     private func finish(_ stop: HermesACPProtocol.Stop) {
         let wrote = !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         commitReply()
+        // A turn that ended took its unanswered approvals with it: the engine
+        // withdrew them and fails those actions closed.
+        for _ in approvals { append(NotchHermesChatMessage(role: .note, text: line(for: .expired))) }
+        if !approvals.isEmpty { approvals = [] }
+        if !answering.isEmpty { answering = [] }
         if stop.wasCancelled {
             if !wrote { append(NotchHermesChatMessage(role: .note, text: text.stopped)) }
         } else if let line = stopNote(stop) {
@@ -286,6 +318,24 @@ final class NotchHermesChatService: ObservableObject {
         reply = ""
         guard !words.isEmpty else { return }
         append(NotchHermesChatMessage(role: .hermes, text: words))
+    }
+
+    private func line(for outcome: NotchAgentApproval.Outcome) -> String {
+        switch outcome {
+        case .allowed: return text.approvalAllowed
+        case .denied: return text.approvalDenied
+        case .expired: return text.approvalExpired
+        }
+    }
+
+    /// The agent is parked until someone answers, and the engine fails the
+    /// action closed when nobody does: the island opens on the conversation,
+    /// without taking the keyboard from whatever is being typed.
+    private func requestAttention() {
+        let notch = NotchService.shared
+        if notch.expanded && notch.selected == .hermesChat { return }
+        notch.reactMascot(.surprised)
+        notch.open(.hermesChat, takeFocus: false)
     }
 
     /// The companion is the agent's face. On the conversation's page it acts

@@ -34,6 +34,11 @@ final class NotchHermesChatClient {
         case finished(HermesACPProtocol.Stop)
         /// A command was refused, because the island never approves one.
         case refused(String?)
+        /// The agent waits for a yes before acting (the VERTUS hub asks;
+        /// a bare `hermes acp` is refused instead, above).
+        case approval(NotchAgentApproval)
+        /// An approval was answered, here or on another surface, or expired.
+        case approvalSettled(String, NotchAgentApproval.Outcome)
         /// One turn could not finish, but the conversation goes on; the text
         /// is why. The hub reports a run's own failure this way.
         case turnFailed(String)

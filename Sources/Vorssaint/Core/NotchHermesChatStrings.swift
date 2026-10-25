@@ -35,6 +35,14 @@ struct NotchHermesChatStrings {
     let you: String
     let copyMessage: String
     let editMessage: String
+    let approvalTitle: String
+    let allowOnce: String
+    let allowSession: String
+    let allowAlways: String
+    let deny: String
+    let approvalAllowed: String
+    let approvalDenied: String
+    let approvalExpired: String
 
     func notFound(_ command: String) -> String { String(format: notFoundFormat, command) }
 
@@ -97,7 +105,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS stopped answering: %1$@",
         you: "You",
         copyMessage: "Copy",
-        editMessage: "Edit"
+        editMessage: "Edit",
+        approvalTitle: "VERTUS needs your OK",
+        allowOnce: "Allow Once",
+        allowSession: "Allow for This Chat",
+        allowAlways: "Always Allow",
+        deny: "Deny",
+        approvalAllowed: "Allowed.",
+        approvalDenied: "Denied.",
+        approvalExpired: "The request expired before an answer."
     )
 
     static let ptBR = NotchHermesChatStrings(
@@ -129,7 +145,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "O VERTUS parou de responder: %1$@",
         you: "Você",
         copyMessage: "Copiar",
-        editMessage: "Editar"
+        editMessage: "Editar",
+        approvalTitle: "O VERTUS precisa da sua permissão",
+        allowOnce: "Permitir uma vez",
+        allowSession: "Permitir nesta conversa",
+        allowAlways: "Sempre permitir",
+        deny: "Negar",
+        approvalAllowed: "Permitido.",
+        approvalDenied: "Negado.",
+        approvalExpired: "O pedido expirou antes de uma resposta."
     )
 
     static let es = NotchHermesChatStrings(
@@ -161,7 +185,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS dejó de responder: %1$@",
         you: "Tú",
         copyMessage: "Copiar",
-        editMessage: "Editar"
+        editMessage: "Editar",
+        approvalTitle: "VERTUS necesita tu permiso",
+        allowOnce: "Permitir una vez",
+        allowSession: "Permitir en esta conversación",
+        allowAlways: "Permitir siempre",
+        deny: "Denegar",
+        approvalAllowed: "Permitido.",
+        approvalDenied: "Denegado.",
+        approvalExpired: "La solicitud caducó antes de una respuesta."
     )
 
     static let sk = NotchHermesChatStrings(
@@ -193,7 +225,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS prestal odpovedať: %1$@",
         you: "Vy",
         copyMessage: "Kopírovať",
-        editMessage: "Upraviť"
+        editMessage: "Upraviť",
+        approvalTitle: "VERTUS potrebuje váš súhlas",
+        allowOnce: "Povoliť raz",
+        allowSession: "Povoliť v tomto chate",
+        allowAlways: "Povoliť vždy",
+        deny: "Zamietnuť",
+        approvalAllowed: "Povolené.",
+        approvalDenied: "Zamietnuté.",
+        approvalExpired: "Žiadosť vypršala skôr, než prišla odpoveď."
     )
 
     static let de = NotchHermesChatStrings(
@@ -225,7 +265,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS antwortet nicht mehr: %1$@",
         you: "Du",
         copyMessage: "Kopieren",
-        editMessage: "Bearbeiten"
+        editMessage: "Bearbeiten",
+        approvalTitle: "VERTUS braucht deine Zustimmung",
+        allowOnce: "Einmal erlauben",
+        allowSession: "In diesem Chat erlauben",
+        allowAlways: "Immer erlauben",
+        deny: "Ablehnen",
+        approvalAllowed: "Erlaubt.",
+        approvalDenied: "Abgelehnt.",
+        approvalExpired: "Die Anfrage ist abgelaufen, bevor eine Antwort kam."
     )
 
     static let fr = NotchHermesChatStrings(
@@ -257,7 +305,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS ne répond plus\u{00A0}: %1$@",
         you: "Vous",
         copyMessage: "Copier",
-        editMessage: "Modifier"
+        editMessage: "Modifier",
+        approvalTitle: "VERTUS a besoin de votre accord",
+        allowOnce: "Autoriser une fois",
+        allowSession: "Autoriser dans cette conversation",
+        allowAlways: "Toujours autoriser",
+        deny: "Refuser",
+        approvalAllowed: "Autorisé.",
+        approvalDenied: "Refusé.",
+        approvalExpired: "La demande a expiré avant une réponse."
     )
 
     static let it = NotchHermesChatStrings(
@@ -289,7 +345,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS non risponde più: %1$@",
         you: "Tu",
         copyMessage: "Copia",
-        editMessage: "Modifica"
+        editMessage: "Modifica",
+        approvalTitle: "VERTUS ha bisogno del tuo consenso",
+        allowOnce: "Consenti una volta",
+        allowSession: "Consenti in questa chat",
+        allowAlways: "Consenti sempre",
+        deny: "Nega",
+        approvalAllowed: "Consentito.",
+        approvalDenied: "Negato.",
+        approvalExpired: "La richiesta è scaduta prima di una risposta."
     )
 
     static let ru = NotchHermesChatStrings(
@@ -321,7 +385,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS перестал отвечать: %1$@",
         you: "Вы",
         copyMessage: "Копировать",
-        editMessage: "Изменить"
+        editMessage: "Изменить",
+        approvalTitle: "VERTUS нужно ваше разрешение",
+        allowOnce: "Разрешить один раз",
+        allowSession: "Разрешить в этом чате",
+        allowAlways: "Всегда разрешать",
+        deny: "Запретить",
+        approvalAllowed: "Разрешено.",
+        approvalDenied: "Запрещено.",
+        approvalExpired: "Запрос истёк до ответа."
     )
 
     static let tr = NotchHermesChatStrings(
@@ -353,7 +425,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS yanıt vermeyi bıraktı: %1$@",
         you: "Siz",
         copyMessage: "Kopyala",
-        editMessage: "Düzenle"
+        editMessage: "Düzenle",
+        approvalTitle: "VERTUS onayınızı bekliyor",
+        allowOnce: "Bir kez izin ver",
+        allowSession: "Bu sohbette izin ver",
+        allowAlways: "Her zaman izin ver",
+        deny: "Reddet",
+        approvalAllowed: "İzin verildi.",
+        approvalDenied: "Reddedildi.",
+        approvalExpired: "İstek yanıtlanmadan süresi doldu."
     )
 
     static let ja = NotchHermesChatStrings(
@@ -385,7 +465,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUSが応答しなくなりました: %1$@",
         you: "あなた",
         copyMessage: "コピー",
-        editMessage: "編集"
+        editMessage: "編集",
+        approvalTitle: "VERTUSが許可を求めています",
+        allowOnce: "今回だけ許可",
+        allowSession: "このチャットで許可",
+        allowAlways: "常に許可",
+        deny: "拒否",
+        approvalAllowed: "許可しました。",
+        approvalDenied: "拒否しました。",
+        approvalExpired: "応答する前に依頼の期限が切れました。"
     )
 
     static let ko = NotchHermesChatStrings(
@@ -417,7 +505,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS가 응답을 멈췄습니다: %1$@",
         you: "나",
         copyMessage: "복사",
-        editMessage: "편집"
+        editMessage: "편집",
+        approvalTitle: "VERTUS가 승인을 요청합니다",
+        allowOnce: "한 번 허용",
+        allowSession: "이 채팅에서 허용",
+        allowAlways: "항상 허용",
+        deny: "거부",
+        approvalAllowed: "허용했습니다.",
+        approvalDenied: "거부했습니다.",
+        approvalExpired: "응답하기 전에 요청이 만료되었습니다."
     )
 
     static let uk = NotchHermesChatStrings(
@@ -449,7 +545,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS перестав відповідати: %1$@",
         you: "Ви",
         copyMessage: "Копіювати",
-        editMessage: "Змінити"
+        editMessage: "Змінити",
+        approvalTitle: "VERTUS потрібен ваш дозвіл",
+        allowOnce: "Дозволити один раз",
+        allowSession: "Дозволити в цьому чаті",
+        allowAlways: "Завжди дозволяти",
+        deny: "Заборонити",
+        approvalAllowed: "Дозволено.",
+        approvalDenied: "Заборонено.",
+        approvalExpired: "Запит сплив до відповіді."
     )
 
     static let zhHans = NotchHermesChatStrings(
@@ -481,7 +585,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS 停止响应：%1$@",
         you: "你",
         copyMessage: "拷贝",
-        editMessage: "编辑"
+        editMessage: "编辑",
+        approvalTitle: "VERTUS 需要你的批准",
+        allowOnce: "允许一次",
+        allowSession: "在此对话中允许",
+        allowAlways: "始终允许",
+        deny: "拒绝",
+        approvalAllowed: "已允许。",
+        approvalDenied: "已拒绝。",
+        approvalExpired: "请求在回复前已过期。"
     )
 
     static let zhTW = NotchHermesChatStrings(
@@ -513,7 +625,15 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS 停止回應：%1$@",
         you: "你",
         copyMessage: "拷貝",
-        editMessage: "編輯"
+        editMessage: "編輯",
+        approvalTitle: "VERTUS 需要你的核准",
+        allowOnce: "允許一次",
+        allowSession: "在此對話中允許",
+        allowAlways: "一律允許",
+        deny: "拒絕",
+        approvalAllowed: "已允許。",
+        approvalDenied: "已拒絕。",
+        approvalExpired: "請求在回覆前已過期。"
     )
 
     static let zhHK = NotchHermesChatStrings(
@@ -545,6 +665,14 @@ extension NotchHermesChatStrings {
         unreachableFormat: "VERTUS 停止回應：%1$@",
         you: "你",
         copyMessage: "拷貝",
-        editMessage: "編輯"
+        editMessage: "編輯",
+        approvalTitle: "VERTUS 需要你的批准",
+        allowOnce: "允許一次",
+        allowSession: "在此對話中允許",
+        allowAlways: "一律允許",
+        deny: "拒絕",
+        approvalAllowed: "已允許。",
+        approvalDenied: "已拒絕。",
+        approvalExpired: "請求在回覆前已逾時。"
     )
 }

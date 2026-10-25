@@ -20,6 +20,7 @@ enum NotchHermesChatTests {
         wiringContracts(suite)
         bubbleContracts(suite)
         hubContracts(suite)
+        approvalContracts(suite)
     }
 
     /// A model writes Markdown; the bubble shows what it means, never the
@@ -450,5 +451,59 @@ enum NotchHermesChatTests {
         let second = reader.append(Data("\":2}\n".utf8))
         suite.expect(first == ["data: {\"a\":1}", ""] && second == ["data: {\"b\":2}"],
                      "a line split across chunks is read whole")
+    }
+
+    /// The hub stops before sending, posting, spending or deleting and asks:
+    /// the page reads the request, offers only the answers the engine takes,
+    /// and sends the one picked back under the island's name.
+    private static func approvalContracts(_ suite: TestSuite) {
+        func event(_ json: String) -> VertusHubSupport.Event? { VertusHubSupport.event(line: "data: " + json, run: "r1") }
+        let request = event(#"{"type":"approval_request","run_id":"r1","approval_id":"a1","description":"VERTUS wants to delete files: rm notes.txt","command":"<terminal> (plugin approval rule)","choices":["once","session","always","deny","bogus"]}"#)
+        guard case .approval(let approval)? = request else {
+            suite.expect(false, "an approval request reads as an approval")
+            return
+        }
+        suite.expect(approval.id == "a1" && approval.choices == [.once, .session, .always, .deny],
+                     "an approval keeps its id and only the answers the engine takes")
+        suite.expect(approval.headline == "VERTUS wants to delete files: rm notes.txt" && approval.detail == nil,
+                     "a rule label is not shown as the command")
+        let engineGate = NotchAgentApproval(id: "a2", description: "recursive delete",
+                                            command: "rm -rf build", choices: [.once, .deny])
+        suite.expect(engineGate.headline == "recursive delete" && engineGate.detail == "rm -rf build",
+                     "the engine's own gate shows its reason with the command under it")
+        suite.expect(NotchAgentApproval(id: "a3", description: " ", command: "git push", choices: []).headline == "git push",
+                     "an approval with no reason names the command")
+        guard case .approval(let fallback)? = event(#"{"type":"approval_request","approval_id":"a4","description":"x"}"#) else {
+            suite.expect(false, "an approval without choices still reads")
+            return
+        }
+        suite.expect(fallback.choices == [.once, .deny], "an approval without choices offers yes once or no")
+        suite.expect(event(#"{"type":"approval_request","description":"x"}"#) == .ignored,
+                     "an approval without an id cannot be answered and is not shown")
+
+        suite.expect(event(#"{"type":"approval_resolved","approval_id":"a1","decision":"session"}"#) == .approvalSettled("a1", .allowed)
+                     && event(#"{"type":"approval_resolved","approval_id":"a1","decision":"deny"}"#) == .approvalSettled("a1", .denied)
+                     && event(#"{"type":"approval_resolved","approval_id":"a1","decision":"withdrawn"}"#) == .approvalSettled("a1", .expired),
+                     "a settled approval says whether it was allowed, denied or expired")
+        suite.expect(event(#"{"type":"approval_request","run_id":"r2","approval_id":"a9","description":"x"}"#) == .ignored,
+                     "another run's approval stays out of this conversation")
+        guard case .approval(let elsewhere)? = VertusHubSupport.event(
+            line: #"data: {"type":"approval_request","run_id":"r2","approval_id":"a9","description":"x"}"#, run: nil) else {
+            suite.expect(false, "the agent-wide watch reads every run's approvals")
+            return
+        }
+        suite.expect(elsewhere.id == "a9", "an approval from a turn started elsewhere still reaches the island")
+        let watch = VertusHubSupport.watch(token: "t")
+        suite.expect(watch.url?.path == "/api/events" && watch.url?.query == "agent_id=primary",
+                     "the watch follows the hub's own agent, every run")
+
+        let answer = VertusHubSupport.answer("a1", choice: .session, token: "t")
+        let body = answer.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        suite.expect(answer.httpMethod == "POST" && answer.url?.path == "/api/approvals/a1"
+                     && body?["choice"] as? String == "session",
+                     "an answer is posted to the approval it settles")
+        suite.expect(answer.value(forHTTPHeaderField: "X-Vertus-Client") == "island"
+                     && answer.value(forHTTPHeaderField: "Authorization") == "Bearer t",
+                     "an answer carries the token and is credited to the island")
     }
 }
