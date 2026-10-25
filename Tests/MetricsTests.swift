@@ -119,6 +119,7 @@ struct MetricsTests {
             }),
             ("switcher-model", { SwitcherModelFeatureTests.run(suite) }),
             ("agents", { NotchAgentTests.run(suite) }),
+            ("hermes-chat", { NotchHermesChatTests.run(suite) }),
             ("features", {
                 FeatureCatalogTests.run(suite)
                 MenuPanelSectionGateContract.run(suite)

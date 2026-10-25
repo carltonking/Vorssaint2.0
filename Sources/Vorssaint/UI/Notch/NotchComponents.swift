@@ -183,6 +183,9 @@ struct NotchSectionsButton: View {
 struct NotchEmptyView<Actions: View>: View {
     let symbol: String
     let message: String
+    /// A drawn mark in place of the symbol, for a page whose agent has a face
+    /// of its own rather than a system glyph.
+    var mark: AnyView? = nil
     @ViewBuilder var actions: () -> Actions
 
     var body: some View {
@@ -205,12 +208,17 @@ struct NotchEmptyView<Actions: View>: View {
     }
 
     private var glyph: some View {
-        Image(systemName: symbol)
-            .font(.system(size: 26, weight: .light))
-            .foregroundStyle(.white.opacity(0.65))
-            .frame(width: 56, height: 56)
-            .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .accessibilityHidden(true)
+        Group {
+            if let mark {
+                mark.frame(width: 26, height: 30)
+            } else {
+                Image(systemName: symbol).font(.system(size: 26, weight: .light))
+            }
+        }
+        .foregroundStyle(.white.opacity(0.65))
+        .frame(width: 56, height: 56)
+        .background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityHidden(true)
     }
 
     private var label: some View {
@@ -222,8 +230,8 @@ struct NotchEmptyView<Actions: View>: View {
 }
 
 extension NotchEmptyView where Actions == EmptyView {
-    init(symbol: String, message: String) {
-        self.init(symbol: symbol, message: message) { EmptyView() }
+    init(symbol: String, message: String, mark: AnyView? = nil) {
+        self.init(symbol: symbol, message: message, mark: mark) { EmptyView() }
     }
 }
 

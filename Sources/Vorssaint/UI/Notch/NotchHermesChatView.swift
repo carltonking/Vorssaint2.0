@@ -1,0 +1,414 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Vorssaint
+
+import AppKit
+import SwiftUI
+
+/// The Hermes Chat settings: the switch, the command, and where the
+/// conversation stands. It lives on the island's own settings page, as the
+/// other page features' settings do.
+struct NotchHermesChatSettingsControls: View {
+    @ObservedObject private var chat = NotchHermesChatService.shared
+    @ObservedObject private var l10n = L10n.shared
+    @AppStorage(DefaultsKey.notchHermesChatEnabled) private var enabled = false
+    @AppStorage(DefaultsKey.notchHermesChatCliPath) private var cliPath = HermesACPSupport.defaultCommand
+    /// The command the running agent was started with. Opening this page is
+    /// not a reason to restart it; editing the field is.
+    @State private var appliedCommand: String?
+    /// The VERTUS hub carries the conversation when it is installed, and then
+    /// the command below has nothing to start. Read once when the page opens,
+    /// never from the body.
+    @State private var usesHub = false
+    private var text: NotchHermesChatStrings { FeatureStrings.notchHermesChat(l10n.language) }
+    private static let editSettleDelay = Duration.milliseconds(700)
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Toggle(text.enable, isOn: $enabled)
+                .disabled(!AppFeature.notchHermesChat.isAvailable)
+            Text(text.description).font(.caption).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if enabled, !usesHub {
+                SettingsRow(symbol: "terminal", title: text.cliPath) {
+                    TextField(text.cliPathPlaceholder, text: $cliPath)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 180)
+                }
+                Text(text.cliPathHint).font(.caption).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if enabled { status }
+        }
+        .onAppear {
+            if appliedCommand == nil { appliedCommand = cliPath }
+            usesHub = VertusHubSupport.token(home: FileManager.default.homeDirectoryForCurrentUser) != nil
+        }
+        .onChange(of: enabled) { _, _ in
+            appliedCommand = cliPath
+            chat.syncWithPreferences()
+        }
+        // One restart for a typed command, once it stops changing, rather
+        // than one per keystroke.
+        .task(id: cliPath) {
+            guard enabled, !usesHub, cliPath != appliedCommand else { return }
+            try? await Task.sleep(for: Self.editSettleDelay)
+            guard !Task.isCancelled, cliPath != appliedCommand else { return }
+            appliedCommand = cliPath
+            chat.retry()
+        }
+    }
+
+    @ViewBuilder private var status: some View {
+        switch chat.state {
+        case .off:
+            EmptyView()
+        case .connecting:
+            Label(text.connecting, systemImage: "clock")
+                .font(.caption).foregroundStyle(.secondary)
+        case .ready:
+            Label(chat.modelName ?? text.ready, systemImage: "checkmark.circle")
+                .font(.caption).foregroundStyle(.secondary)
+        case .failed(let failure):
+            HStack(spacing: 8) {
+                Label(message(failure), systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(text.retry) { chat.retry() }
+                    .controlSize(.small)
+            }
+        }
+    }
+
+    private func message(_ failure: NotchHermesChatService.Failure) -> String {
+        switch failure {
+        case .notFound(let command): return text.notFound(command)
+        case .unreachable(let reason): return text.unreachable(reason)
+        }
+    }
+}
+
+/// The page: the conversation, the reply being written, and the field that
+/// sends the next message. Hermes decides what tools to use; the island only
+/// carries the words, and refuses the commands it would have to approve
+/// unseen.
+struct NotchHermesChatView: View {
+    let size: CGSize
+    @ObservedObject private var chat = NotchHermesChatService.shared
+    @ObservedObject private var l10n = L10n.shared
+    @AppStorage(DefaultsKey.notchHermesChatEnabled) private var enabled = false
+    @Environment(\.notchSettingsPreview) private var preview
+    @State private var draft = ""
+    @FocusState private var typing: Bool
+    /// Replies finished before the page opened: only the ones after it make
+    /// the companion cheer here.
+    @State private var cheeredReplies: Int?
+    private var text: NotchHermesChatStrings { FeatureStrings.notchHermesChat(l10n.language) }
+
+    private static let bottomID = "hermes-bottom"
+
+    private var hasConversation: Bool {
+        !chat.messages.isEmpty || !chat.reply.isEmpty || chat.working
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            if hasConversation {
+                transcript
+            } else {
+                opening
+            }
+            composer
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        // The island already holds the keyboard when it opens; the field takes
+        // it so the first words typed are the message, as in the Command Bar.
+        // A settings preview leaves the keyboard where it was.
+        .onAppear { if cheeredReplies == nil { cheeredReplies = chat.completedReplies } }
+        .task {
+            guard !preview else { return }
+            try? await Task.sleep(for: .milliseconds(80))
+            typing = true
+        }
+        .notchBand(leading: { status }, trailing: {
+            NotchIconButton(symbol: "trash", title: text.clear) { chat.clear() }
+                .disabled(chat.messages.isEmpty && chat.reply.isEmpty)
+        })
+    }
+
+    // MARK: Conversation
+
+    private var transcript: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    ForEach(chat.messages) { message in
+                        row(message)
+                    }
+                    liveTurn
+                    Color.clear.frame(height: 1).id(Self.bottomID)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 2)
+            }
+            .scrollIndicators(.hidden)
+            .onAppear { scroll(proxy, animated: false) }
+            // A finished turn is worth a slide; a reply writing itself is
+            // not, or the island would animate on every few words.
+            .onChange(of: chat.messages.count) { _, _ in scroll(proxy, animated: true) }
+            .onChange(of: chat.working) { _, _ in scroll(proxy, animated: true) }
+            .onChange(of: chat.reply) { _, _ in scroll(proxy, animated: false) }
+        }
+    }
+
+    private func scroll(_ proxy: ScrollViewProxy, animated: Bool) {
+        // The layout for this change has not happened yet; scrolling after it
+        // lands on the new bottom rather than the old one.
+        DispatchQueue.main.async {
+            if animated {
+                withAnimation(.easeOut(duration: 0.16)) { proxy.scrollTo(Self.bottomID, anchor: .bottom) }
+            } else {
+                proxy.scrollTo(Self.bottomID, anchor: .bottom)
+            }
+        }
+    }
+
+    @ViewBuilder private func row(_ message: NotchHermesChatMessage) -> some View {
+        switch message.role {
+        case .person:
+            NotchHermesChatBubble(words: message.text, mine: true, text: text) { draft = message.text; typing = true }
+                .accessibilityLabel("\(text.you): \(message.text)")
+        case .hermes:
+            NotchHermesChatBubble(words: message.text, mine: false, text: text)
+                .accessibilityLabel("\(text.title): \(message.text)")
+        case .tool:
+            Label(message.text, systemImage: "wrench.and.screwdriver")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.white.opacity(0.45))
+                .lineLimit(2)
+        case .note:
+            Label(message.text, systemImage: "info.circle")
+                .font(.system(size: 10.5))
+                .foregroundStyle(.white.opacity(0.5))
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    /// The reply in flight, with the reasoning Hermes chose to show above it
+    /// and a mark while there is nothing to read yet.
+    @ViewBuilder private var liveTurn: some View {
+        if chat.working {
+            VStack(alignment: .leading, spacing: 6) {
+                if !chat.thinking.isEmpty {
+                    Text(chat.thinking)
+                        .font(.system(size: 10.5).italic())
+                        .foregroundStyle(.white.opacity(0.4))
+                        .lineLimit(5)
+                }
+                if chat.reply.isEmpty {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.mini)
+                        Text("\(text.thinking)…")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.5))
+                    }
+                    .padding(.leading, 4)
+                } else {
+                    NotchHermesChatBubble(words: chat.reply, mine: false, text: text, live: true)
+                }
+            }
+        }
+    }
+
+
+    // MARK: Opening
+
+    /// Before the first message: what the page is for, and the one reason it
+    /// could not start, with the way to try again.
+    @ViewBuilder private var opening: some View {
+        if case .failed(let failure) = chat.state {
+            NotchEmptyView(symbol: "exclamationmark.triangle", message: message(failure)) {
+                NotchPillButton(title: text.retry, prominent: true) { chat.retry() }
+            }
+        } else if !enabled && !preview {
+            NotchEmptyView(symbol: NotchModule.hermesChat.symbol, message: text.emptyTitle, mark: Self.mark)
+        } else if case .connecting = chat.state {
+            NotchEmptyView(symbol: NotchModule.hermesChat.symbol, message: text.connecting, mark: Self.mark)
+        } else {
+            NotchEmptyView(symbol: NotchModule.hermesChat.symbol, message: text.emptySubtitle, mark: Self.mark)
+        }
+    }
+
+    private func message(_ failure: NotchHermesChatService.Failure) -> String {
+        switch failure {
+        case .notFound(let command): return text.notFound(command)
+        case .unreachable(let reason): return text.unreachable(reason)
+        }
+    }
+
+    /// VERTUS's own mark where the page would otherwise show a chat glyph.
+    private static let mark = AnyView(VertusMark().fill(style: FillStyle(eoFill: true)))
+
+    // MARK: Band and composer
+
+    /// The island's top row carries only the companion, the agent's face: its
+    /// mood already says whether a session is starting, working or stuck, and
+    /// the model behind it is not the user's concern (the settings page names
+    /// it).
+    @ViewBuilder private var status: some View {
+        if NotchMascotSupport.isEnabled() {
+            NotchMascotView(look: NotchMascotSupport.look(), mood: companionMood, size: 20,
+                            cue: .celebrate, cueID: chat.completedReplies - (cheeredReplies ?? chat.completedReplies))
+                .frame(width: 20, height: 20)
+                .help(text.title)
+                .accessibilityLabel(text.title)
+        }
+    }
+
+    /// Thoughtful while Hermes works, puzzled when it cannot be reached, at
+    /// ease otherwise.
+    private var companionMood: NotchMascotMood {
+        if chat.working { return .thinking }
+        if case .failed = chat.state { return .confused }
+        if case .connecting = chat.state { return .searching }
+        return .idle
+    }
+
+    private var composer: some View {
+        HStack(spacing: 8) {
+            TextField(text.placeholder, text: $draft, axis: .vertical)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+                .lineLimit(1...3)
+                .focused($typing)
+                .onSubmit(submit)
+                .accessibilityLabel(text.placeholder)
+            if chat.working {
+                NotchIconButton(symbol: "stop.fill", title: text.stop) { chat.cancel() }
+            } else {
+                NotchIconButton(symbol: "arrow.up", title: text.send, action: submit)
+                    .disabled(trimmedDraft.isEmpty)
+            }
+        }
+        .padding(.horizontal, 10)
+        .frame(minHeight: 34)
+        .modifier(NotchControlSurface(cornerRadius: 11))
+    }
+
+    private var trimmedDraft: String {
+        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func submit() {
+        let words = trimmedDraft
+        guard !words.isEmpty else { return }
+        draft = ""
+        chat.send(words)
+        typing = true
+    }
+}
+
+/// One message as a chat shows it: yours on the right in a light bubble, the
+/// agent's on the left in a dark one with its Markdown drawn. Under the
+/// pointer, the actions for it sit beside the bubble.
+private struct NotchHermesChatBubble: View {
+    let words: String
+    let mine: Bool
+    let text: NotchHermesChatStrings
+    /// A reply still being written: no actions until it is whole.
+    var live = false
+    /// Puts your message back in the field to send again, changed.
+    var edit: (() -> Void)? = nil
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 6) {
+            if mine { Spacer(minLength: 40) }
+            bubbleWithActions
+            if !mine { Spacer(minLength: 40) }
+        }
+        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+    }
+
+    /// The bubble and its actions answer the pointer as one piece, gap
+    /// included: hovering only the words hid the actions as the pointer
+    /// crossed the gap on its way to Copy.
+    private var bubbleWithActions: some View {
+        HStack(alignment: .top, spacing: 6) {
+            if mine { actions }
+            content
+                .font(.system(size: 12))
+                .foregroundStyle(mine ? Color.black.opacity(0.88) : Color.white.opacity(0.9))
+                .tint(mine ? Color.blue : Color.accentColor)
+                .lineSpacing(2)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+                .padding(.horizontal, 11)
+                .padding(.vertical, 8)
+                .background(mine ? Color.white.opacity(0.92) : Color.white.opacity(0.09),
+                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            if !mine { actions }
+        }
+        .contentShape(Rectangle())
+        .onHover { hovered = $0 }
+    }
+
+    /// The agent's words with their bold, italics, code and links drawn, and
+    /// your own as typed. Words that will not read as Markdown show as they are.
+    private var content: Text {
+        guard !mine, let styled = try? AttributedString(
+            markdown: HermesACPSupport.bubbleMarkdown(words),
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace,
+                           failurePolicy: .returnPartiallyParsedIfPossible)) else { return Text(words) }
+        return Text(styled)
+    }
+
+    private var actions: some View {
+        HStack(spacing: 2) {
+            action("doc.on.doc", text.copyMessage) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(words, forType: .string)
+            }
+            if let edit { action("pencil", text.editMessage, edit) }
+        }
+        .padding(.top, 4)
+        // Kept in the layout so the bubble does not shift as the pointer
+        // comes and goes.
+        .opacity(hovered && !live ? 1 : 0)
+        .allowsHitTesting(hovered && !live)
+    }
+
+    private func action(_ symbol: String, _ title: String, _ perform: @escaping () -> Void) -> some View {
+        Button(action: perform) {
+            Image(systemName: symbol)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundStyle(.white.opacity(0.5))
+                .frame(width: 20, height: 20)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
+    }
+}
+
+/// The VERTUS mark: a pointed-top hexagon with a triangle cut out of it,
+/// joining its top corner to its two lower side corners. Drawn rather than
+/// shipped as an image so it stays sharp at any size and takes the island's
+/// colour; filled even-odd, the triangle is the hole.
+struct VertusMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        func point(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        }
+        // A regular hexagon's side corners sit a quarter of its height from
+        // the top and bottom.
+        let top = point(0.5, 0), upperRight = point(1, 0.25), lowerRight = point(1, 0.75)
+        let bottom = point(0.5, 1), lowerLeft = point(0, 0.75), upperLeft = point(0, 0.25)
+        var path = Path()
+        path.addLines([top, upperRight, lowerRight, bottom, lowerLeft, upperLeft])
+        path.closeSubpath()
+        path.addLines([top, lowerLeft, lowerRight])
+        path.closeSubpath()
+        return path
+    }
+}

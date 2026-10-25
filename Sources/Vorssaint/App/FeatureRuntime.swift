@@ -374,6 +374,11 @@ final class FeatureRuntime: ObservableObject {
             if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }
             else { NotchWatchService.shared.stop() }
         },
+        // The agent process lives exactly as long as the island can show it.
+        .notchHermesChat: {
+            if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }
+            NotchHermesChatService.shared.syncWithPreferences()
+        },
         // Leaving folds the wings it rests in, and coming back greets.
         .notchMascot: {
             if AppFeature.notch.isAvailable { NotchService.shared.syncWithPreferences() }

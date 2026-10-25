@@ -859,6 +859,10 @@ enum DefaultsKey {
     static let notchWatchEnabled = "notchWatchEnabled"
     static let notchWatchSound = "notchWatchSound"
     static let notchWatchCondition = "notchWatchCondition"
+    // Hermes Chat: an Agent Client Protocol conversation with the local
+    // `hermes acp` server, held by the island.
+    static let notchHermesChatEnabled = "notchHermesChatEnabled"
+    static let notchHermesChatCliPath = "notchHermesChatCliPath"
     static let notchCalendarEnabled = "notchCalendarEnabled"
     static let notchCalendarCountdown = "notchCalendarCountdown"
     static let notchCalendarTimeLeft = "notchCalendarTimeLeft" // the event under way counts down to its end
@@ -1485,6 +1489,9 @@ enum Defaults {
         DefaultsKey.notchWatchEnabled: true,
         DefaultsKey.notchWatchSound: true,
         DefaultsKey.notchWatchCondition: NotchWatchCondition.changes.rawValue,
+        // Off until asked for: the switch starts a local agent process.
+        DefaultsKey.notchHermesChatEnabled: false,
+        DefaultsKey.notchHermesChatCliPath: HermesACPSupport.defaultCommand,
         DefaultsKey.notchEnabled: false,
         DefaultsKey.notchDisplay: NotchDisplay.automatic.rawValue,
         DefaultsKey.notchSilhouette: NotchSilhouette.capsule.rawValue,
@@ -1981,6 +1988,7 @@ enum Defaults {
         migrateSwitcherPreviewSize(in: defaults)
         migrateSwitcherPreviewExcludedApps(in: defaults)
         migrateNotchWatchAvailability(in: defaults)
+        migrateNotchHermesChatAvailability(in: defaults)
         defaults.register(defaults: registeredDefaults)
         defaults.register(defaults: AppFeature.availabilityDefaults)
         activateBetaChannelIfRunningBeta(in: defaults)
@@ -2237,6 +2245,16 @@ enum Defaults {
               defaults.object(forKey: AppFeature.notch.availabilityKey) as? Bool == false
         else { return }
         defaults.set(false, forKey: AppFeature.notchWatch.availabilityKey)
+    }
+
+    /// Hermes Chat reached development builds before new features became
+    /// opt-in. Whoever already switched it on keeps it installed; everyone
+    /// else meets it on the Features page, as every new extension ships.
+    static func migrateNotchHermesChatAvailability(in defaults: UserDefaults) {
+        guard defaults.object(forKey: AppFeature.notchHermesChat.availabilityKey) == nil,
+              defaults.object(forKey: DefaultsKey.notchHermesChatEnabled) as? Bool == true
+        else { return }
+        defaults.set(true, forKey: AppFeature.notchHermesChat.availabilityKey)
     }
 
     /// Linear scrolling reached development builds installed, before new
