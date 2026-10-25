@@ -335,6 +335,17 @@ struct VertusRoutineReplies {
     /// What a check-in routine replies when it has nothing worth saying. The
     /// island stays silent then: no line, no companion, no opening.
     static let silence = "NOTHING_TO_REPORT"
+
+    /// The hub's own reading (proactive_routines.is_nothing_to_report): the
+    /// bare token, allowing the code fence, backticks or quotes a model
+    /// sometimes wraps it in. Words around it make it a real message.
+    static func isSilence(_ reply: String) -> Bool {
+        var text = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        if text.count >= 6, text.hasPrefix("```"), text.hasSuffix("```") {
+            text = String(text.dropFirst(3).dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return text.trimmingCharacters(in: CharacterSet(charactersIn: "`'\" \n\t")) == silence
+    }
     /// Routine runs followed at once. One whose end the watch never heard
     /// (the hub restarted mid-run) is let go, oldest first, past this.
     static let maximumRuns = 8
@@ -411,7 +422,7 @@ struct VertusRoutineReplies {
             // a repeat finds nothing to send again.
             let finished = collecting.remove(at: index)
             let words = finished.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !words.isEmpty, words != Self.silence else { return nil }
+            guard !words.isEmpty, !Self.isSilence(words) else { return nil }
             return Message(run: finished.run, routine: finished.routine,
                            text: finished.truncated ? words + "…" : words)
         case .error, .cancelled:

@@ -21,6 +21,7 @@ enum NotchHermesChatTests {
         bubbleContracts(suite)
         hubContracts(suite)
         approvalContracts(suite)
+        silenceContracts(suite)
         routineReplyContracts(suite)
         reachOutContracts(suite)
     }
@@ -675,6 +676,18 @@ enum NotchHermesChatTests {
             suite.expect(strings.reachedOut("Morning check-in").contains("Morning check-in")
                          && strings.reachedOutFormat.contains("%1$@"),
                          "a named routine is credited in \(language)")
+        }
+    }
+
+    /// The check-in's "nothing to say" reads the same on the island as on
+    /// the hub, wrapped or not; with other words around it, it is a message.
+    private static func silenceContracts(_ suite: TestSuite) {
+        for quiet in ["NOTHING_TO_REPORT", "  NOTHING_TO_REPORT\n", "`NOTHING_TO_REPORT`",
+                      "\"NOTHING_TO_REPORT\"", "```\nNOTHING_TO_REPORT\n```"] {
+            suite.expect(VertusRoutineReplies.isSilence(quiet), "\(quiet.debugDescription) keeps the island silent")
+        }
+        for spoken in ["NOTHING_TO_REPORT, sir.", "Nothing to report", "Mail: NOTHING_TO_REPORT", ""] {
+            suite.expect(!VertusRoutineReplies.isSilence(spoken), "\(spoken.debugDescription) is a real message")
         }
     }
 }
