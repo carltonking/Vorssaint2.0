@@ -21,6 +21,8 @@ enum NotchHermesChatTests {
         bubbleContracts(suite)
         hubContracts(suite)
         approvalContracts(suite)
+        routineReplyContracts(suite)
+        reachOutContracts(suite)
     }
 
     /// A model writes Markdown; the bubble shows what it means, never the
@@ -541,5 +543,138 @@ enum NotchHermesChatTests {
                      "an answer carries the approver credential no agent is given")
         suite.expect(VertusHubSupport.approverTokenURL(home: URL(fileURLWithPath: "/Users/x")).path
                      == "/Users/x/.vertus/approver-token", "the approver credential lives beside the hub's token")
+    }
+
+    // MARK: VERTUS writing first
+
+    /// A routine the hub fires on its own writes a reply nobody on the island
+    /// asked for. Only those runs become messages, whole, once they end well,
+    /// and the check-in that has nothing to say stays silent.
+    private static func routineReplyContracts(_ suite: TestSuite) {
+        func line(_ json: String) -> String { "data: " + json }
+        func watched(_ json: String) -> VertusHubSupport.WatchEvent? { VertusHubSupport.watchEvent(line: line(json)) }
+        func fired(_ run: String, routine: String = "rt1") -> String {
+            #"{"type":"routine_fired","routine_id":""# + routine + #"","agent_id":"primary","run_id":""# + run + #"","manual":false,"seq":3}"#
+        }
+        func text(_ run: String, _ words: String) -> String {
+            let object: [String: Any] = ["type": "text", "run_id": run, "agent_id": "primary", "text": words]
+            return (try? JSONSerialization.data(withJSONObject: object)).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        }
+        func end(_ run: String, _ type: String = "done") -> String {
+            #"{"type":""# + type + #"","run_id":""# + run + #"","agent_id":"primary"}"#
+        }
+        /// Feeds lines through the watch's own reading, as the client does,
+        /// and returns every message that came out.
+        func feed(_ replies: inout VertusRoutineReplies, _ lines: [String]) -> [VertusRoutineReplies.Message] {
+            lines.compactMap { json in
+                guard let event = watched(json) else { return nil }
+                return replies.receive(event.event, run: event.run)
+            }
+        }
+
+        suite.expect(watched(fired("r7")) == VertusHubSupport.WatchEvent(run: "r7", event: .routineFired(routine: "rt1", run: "r7")),
+                     "a fired routine names itself and the run carrying its reply")
+        suite.expect(watched(#"{"type":"routine_fired","routine_id":"rt1","run_id":""}"#)?.event == .ignored
+                     && watched(#"{"type":"routine_fired","run_id":"r7"}"#)?.event == .ignored,
+                     "a fired routine without its run or its id has nothing to follow")
+        suite.expect(VertusHubSupport.event(line: line(fired("r7")), run: "r1") == .ignored,
+                     "a routine's run stays out of the island's own turn")
+        suite.expect(watched(#"{"type":"routine_skipped","routine_id":"rt1","run_id":""}"#)?.event == .ignored
+                     && watched(#"{"type":"memory_write","run_id":"r7"}"#)?.event == .ignored,
+                     "other hub traffic is still ignored")
+
+        var replies = VertusRoutineReplies()
+        let messages = feed(&replies, [
+            fired("r7"), text("r7", "Your flight "), text("terminal", "unrelated words"),
+            text("r7", "leaves at **9:40**."), end("terminal"), end("r7"), end("r7"),
+        ])
+        suite.expect(messages == [VertusRoutineReplies.Message(run: "r7", routine: "rt1", text: "Your flight leaves at **9:40**.")],
+                     "a routine's reply comes out once, whole, when its run is done, and a repeated done sends nothing")
+        suite.expect(feed(&replies, [text("other", "Hello"), end("other")]).isEmpty,
+                     "a run no routine started, such as the terminal's, is never a message")
+        suite.expect(replies.followed == 0, "a finished run is let go")
+
+        var own = VertusRoutineReplies()
+        own.ignore(run: "mine")
+        suite.expect(feed(&own, [fired("mine"), text("mine", "The answer"), end("mine")]).isEmpty && own.followed == 0,
+                     "the island's own run is never shown a second time as a message sent unasked")
+        var late = VertusRoutineReplies()
+        _ = feed(&late, [fired("r8"), text("r8", "half")])
+        late.ignore(run: "r8")
+        suite.expect(feed(&late, [text("r8", " more"), end("r8")]).isEmpty,
+                     "a run the island claims as its own stops being collected")
+
+        var quiet = VertusRoutineReplies()
+        suite.expect(feed(&quiet, [fired("c1"), text("c1", "NOTHING_"), text("c1", "TO_REPORT\n"), end("c1")]).isEmpty
+                     && feed(&quiet, [fired("c2"), text("c2", "  NOTHING_TO_REPORT  "), end("c2")]).isEmpty,
+                     "a check-in with nothing to report says nothing at all")
+        suite.expect(feed(&quiet, [fired("c3"), text("c3", "nothing_to_report"), end("c3")]).map(\.text) == ["nothing_to_report"],
+                     "only the exact sentinel is silence")
+        suite.expect(feed(&quiet, [fired("c4"), text("c4", " \n "), end("c4")]).isEmpty,
+                     "an empty reply is not a message")
+
+        var failing = VertusRoutineReplies()
+        suite.expect(feed(&failing, [fired("e1"), text("e1", "Half a thou"), end("e1", "error")]).isEmpty
+                     && feed(&failing, [fired("x1"), text("x1", "Started"), end("x1", "cancelled")]).isEmpty
+                     && failing.followed == 0,
+                     "a routine that fails or is cancelled stays silent and is let go")
+        suite.expect(feed(&failing, [end("e1")]).isEmpty, "a done after a failure finds nothing to send")
+
+        var many = VertusRoutineReplies()
+        let runs = (0..<(VertusRoutineReplies.maximumRuns + 3)).map { "m\($0)" }
+        _ = feed(&many, runs.flatMap { [fired($0), text($0, "from \($0)")] })
+        suite.expect(many.followed == VertusRoutineReplies.maximumRuns,
+                     "only so many routine runs are followed at once")
+        suite.expect(feed(&many, [end(runs[0])]).isEmpty && feed(&many, [end(runs.last!)]).map(\.text) == ["from \(runs.last!)"],
+                     "the oldest run whose end never came is the one let go")
+
+        var long = VertusRoutineReplies()
+        let chunk = String(repeating: "a", count: 1_000)
+        let chunks = (0..<(VertusRoutineReplies.maximumCharacters / 1_000 + 3)).map { _ in text("l1", chunk) }
+        let capped = feed(&long, [fired("l1")] + chunks + [end("l1")])
+        suite.expect(capped.count == 1 && capped[0].text.count == VertusRoutineReplies.maximumCharacters + 1
+                     && capped[0].text.hasSuffix("…"),
+                     "a runaway reply is cut at the limit and says so")
+
+        let listing = try? JSONSerialization.data(withJSONObject: ["routines": [
+            ["routine_id": "rt1", "agent_id": "primary", "name": " Morning check-in ", "prompt": "Check in."],
+            ["routine_id": "rt2", "agent_id": "primary", "name": "", "prompt": "x"],
+            ["routine_id": "", "name": "orphan"],
+        ]])
+        suite.expect(VertusHubSupport.routineNames(from: listing) == ["rt1": "Morning check-in"]
+                     && VertusHubSupport.routineNames(from: nil).isEmpty,
+                     "routines are named by id, and one without a name is left to the plain line")
+        let routines = VertusHubSupport.routines(token: "t")
+        suite.expect(routines.httpMethod == "GET" && routines.url?.path == "/api/routines"
+                     && routines.url?.query == "agent_id=primary"
+                     && routines.value(forHTTPHeaderField: "Authorization") == "Bearer t",
+                     "the routine names are the hub agent's own")
+    }
+
+    /// A message nobody waits on never pins the island or takes a page in
+    /// use, and the line over it says VERTUS wrote first, in every language.
+    private static func reachOutContracts(_ suite: TestSuite) {
+        suite.expect(NotchAgentReachOut.attention(expanded: false, showingChat: false) == .open
+                     && NotchAgentReachOut.attention(expanded: false, showingChat: true) == .open,
+                     "a closed island opens on the conversation")
+        suite.expect(NotchAgentReachOut.attention(expanded: true, showingChat: true) == .append,
+                     "with the conversation on screen the message just lands")
+        suite.expect(NotchAgentReachOut.attention(expanded: true, showingChat: false) == .nudge,
+                     "a page in use is not taken; the companion reacts instead")
+
+        let message = NotchHermesChatMessage(role: .proactive, text: "Hi", source: "Morning check-in")
+        suite.expect(message.role == .proactive && message.source == "Morning check-in"
+                     && NotchHermesChatMessage(role: .hermes, text: "x").source == nil,
+                     "a message sent unasked keeps the routine that wrote it")
+
+        for language in AppLanguage.allCases {
+            let strings = FeatureStrings.notchHermesChat(language)
+            suite.expect(!strings.reachedOut.isEmpty && strings.reachedOut(nil) == strings.reachedOut
+                         && strings.reachedOut("") == strings.reachedOut,
+                         "an unnamed routine reads as the plain line in \(language)")
+            suite.expect(strings.reachedOut("Morning check-in").contains("Morning check-in")
+                         && strings.reachedOutFormat.contains("%1$@"),
+                         "a named routine is credited in \(language)")
+        }
     }
 }

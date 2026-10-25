@@ -102,6 +102,12 @@ enum VertusHubSupport {
                 query: [URLQueryItem(name: "state", value: "pending"), URLQueryItem(name: "limit", value: "50")])
     }
 
+    /// The hub agent's routines, for the name a message VERTUS sent on its
+    /// own is credited to.
+    static func routines(token: String) -> URLRequest {
+        request("api/routines", token: token, query: [URLQueryItem(name: "agent_id", value: agentID)])
+    }
+
     static func cancel(run: String, token: String) -> URLRequest {
         request("api/runs/\(run)/cancel", token: token, method: "POST", body: [:])
     }
@@ -150,6 +156,21 @@ enum VertusHubSupport {
                                       command: row["target"] as? String ?? "", choices: [.once, .deny],
                                       runID: row["run_id"] as? String)
         }
+    }
+
+    /// Routine names by id, from `GET /api/routines`. A routine without a
+    /// name is left out, so its message falls back to the plain line.
+    static func routineNames(from data: Data?) -> [String: String] {
+        let object = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        let rows = object?["routines"] as? [[String: Any]] ?? []
+        var names: [String: String] = [:]
+        for row in rows {
+            guard let id = row["routine_id"] as? String, !id.isEmpty,
+                  let name = (row["name"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !name.isEmpty else { continue }
+            names[id] = name
+        }
+        return names
     }
 
     /// What the hub said to an answer.
@@ -203,9 +224,32 @@ enum VertusHubSupport {
         case approval(NotchAgentApproval)
         /// An approval was answered (here or anywhere else) or withdrawn.
         case approvalSettled(String, NotchAgentApproval.Outcome)
+        /// One of the agent's routines started a run of its own: what that
+        /// run writes is VERTUS speaking first, not answering the island.
+        case routineFired(routine: String, run: String)
         /// Status the page does not show: "thinking…", memory writes, other
         /// runs' traffic.
         case ignored
+    }
+
+    /// One event of the agent-wide watch, with the run it belongs to: the
+    /// watch carries every run at once, so the run is what tells a routine's
+    /// reply from the island's own or the terminal's.
+    struct WatchEvent: Equatable {
+        let run: String?
+        let event: Event
+    }
+
+    static func watchEvent(line: String) -> WatchEvent? {
+        guard let event = event(line: line, run: nil) else { return nil }
+        return WatchEvent(run: runID(line: line), event: event)
+    }
+
+    private static func runID(line: String) -> String? {
+        guard line.hasPrefix("data:"),
+              let data = line.dropFirst(5).trimmingCharacters(in: .whitespaces).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (object["run_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }
     }
 
     /// Splits a stream's bytes into its `data:` payloads, keeping a partial
@@ -256,6 +300,10 @@ enum VertusHubSupport {
         case "approval_resolved":
             guard let id = object["approval_id"] as? String, !id.isEmpty else { return .ignored }
             return .approvalSettled(id, NotchAgentApproval.Outcome(decision: object["decision"] as? String))
+        case "routine_fired":
+            guard let routine = object["routine_id"] as? String, !routine.isEmpty,
+                  let fired = object["run_id"] as? String, !fired.isEmpty else { return .ignored }
+            return .routineFired(routine: routine, run: fired)
         case "error":
             let reason = (object["message"] as? String).flatMap { $0.isEmpty ? nil : $0 }
             return .error(reason ?? "VERTUS did not answer.")
@@ -272,6 +320,126 @@ enum VertusHubSupport {
             .trimmingCharacters(in: CharacterSet(charactersIn: "…. "))
         guard !name.isEmpty, name != "tools" else { return nil }
         return name
+    }
+}
+
+/// The replies VERTUS writes on its own: a routine fires on the hub's
+/// schedule, and what its run says is a message nobody on the island asked
+/// for. Fed the agent-wide watch one event at a time, this keeps the words of
+/// each routine run until the run ends, and hands back the finished message.
+///
+/// Only runs a `routine_fired` named are collected. The island's own turns
+/// and the terminal's stream through the same watch and are someone's answer
+/// already, so their words are never kept here.
+struct VertusRoutineReplies {
+    /// What a check-in routine replies when it has nothing worth saying. The
+    /// island stays silent then: no line, no companion, no opening.
+    static let silence = "NOTHING_TO_REPORT"
+    /// Routine runs followed at once. One whose end the watch never heard
+    /// (the hub restarted mid-run) is let go, oldest first, past this.
+    static let maximumRuns = 8
+    /// A message the island will show in a bubble; anything longer is cut
+    /// here rather than held in memory for a reply that ran away.
+    static let maximumCharacters = 8_000
+    /// The island's own runs remembered, so a late event of one cannot
+    /// start being collected.
+    static let maximumOwnRuns = 32
+
+    struct Message: Equatable {
+        let run: String
+        let routine: String
+        let text: String
+    }
+
+    private struct Collecting {
+        let run: String
+        let routine: String
+        var text = ""
+        var characters = 0
+        var truncated = false
+    }
+
+    /// Oldest first.
+    private var collecting: [Collecting] = []
+    private var own: [String] = []
+
+    /// How many routine runs are being followed.
+    var followed: Int { collecting.count }
+
+    /// A run the island started itself: its reply is the island's turn,
+    /// shown as it streams, never a second time as a message sent unasked.
+    mutating func ignore(run: String) {
+        collecting.removeAll { $0.run == run }
+        guard !own.contains(run) else { return }
+        own.append(run)
+        if own.count > Self.maximumOwnRuns { own.removeFirst(own.count - Self.maximumOwnRuns) }
+    }
+
+    /// Takes one watch event; returns a message when a routine run ended
+    /// with something to say.
+    ///
+    /// A run that fails or is cancelled says nothing on the island. Nobody
+    /// asked for it, so a failure is not news worth interrupting for, and a
+    /// half-written message would claim attention for words VERTUS never
+    /// finished. The hub keeps the failure on the routine itself, where it
+    /// counts them and turns off a routine that keeps failing.
+    mutating func receive(_ event: VertusHubSupport.Event, run: String?) -> Message? {
+        if case .routineFired(let routine, let fired) = event {
+            guard !own.contains(fired), !collecting.contains(where: { $0.run == fired }) else { return nil }
+            collecting.append(Collecting(run: fired, routine: routine))
+            if collecting.count > Self.maximumRuns { collecting.removeFirst(collecting.count - Self.maximumRuns) }
+            return nil
+        }
+        guard let run, let index = collecting.firstIndex(where: { $0.run == run }) else { return nil }
+        switch event {
+        case .text(let words):
+            var entry = collecting[index]
+            let room = Self.maximumCharacters - entry.characters
+            guard room > 0 else {
+                entry.truncated = true
+                collecting[index] = entry
+                return nil
+            }
+            let kept = words.count > room ? String(words.prefix(room)) : words
+            entry.truncated = entry.truncated || kept.count < words.count
+            entry.text += kept
+            entry.characters += kept.count
+            collecting[index] = entry
+            return nil
+        case .done:
+            // The hub can repeat `done`; the run is gone after the first, so
+            // a repeat finds nothing to send again.
+            let finished = collecting.remove(at: index)
+            let words = finished.text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !words.isEmpty, words != Self.silence else { return nil }
+            return Message(run: finished.run, routine: finished.routine,
+                           text: finished.truncated ? words + "…" : words)
+        case .error, .cancelled:
+            collecting.remove(at: index)
+            return nil
+        default:
+            return nil
+        }
+    }
+}
+
+/// How the island gets attention for a message VERTUS sent unasked. Unlike
+/// an approval nothing waits on it, so it never pins the island and never
+/// takes a page the person is using.
+enum NotchAgentReachOut: Equatable {
+    /// The conversation is on screen: the message landing is enough.
+    case append
+    /// The island is open on something else: the companion reacts, and the
+    /// message waits on the chat page.
+    case nudge
+    /// The island is closed: it opens on the conversation, unpinned and
+    /// without the keyboard, so a click elsewhere or the pointer passing
+    /// over and away puts it back as it would any island opened by hover.
+    case open
+
+    static func attention(expanded: Bool, showingChat: Bool) -> NotchAgentReachOut {
+        guard expanded else { return .open }
+        return showingChat ? .append : .nudge
     }
 }
 

@@ -196,6 +196,18 @@ struct NotchHermesChatView: View {
                 .font(.system(size: 10.5))
                 .foregroundStyle(.white.opacity(0.5))
                 .fixedSize(horizontal: false, vertical: true)
+        case .proactive:
+            // Marked above the bubble, so a message VERTUS sent unasked
+            // does not read as the answer to whatever was said before it.
+            VStack(alignment: .leading, spacing: 4) {
+                Label(text.reachedOut(message.source), systemImage: "sparkles")
+                    .font(.system(size: 10.5, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.55))
+                    .lineLimit(1)
+                NotchHermesChatBubble(words: message.text, mine: false, text: text)
+            }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("\(text.reachedOut(message.source)): \(message.text)")
         }
     }
 

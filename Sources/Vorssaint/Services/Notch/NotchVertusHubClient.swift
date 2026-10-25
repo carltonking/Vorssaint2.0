@@ -57,12 +57,19 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
     private var stream: URLSessionDataTask?
     private var reader = VertusHubSupport.LineReader()
     /// The agent-wide stream, held for the whole conversation, from which
-    /// only approvals are taken: a turn the island did not start can still
-    /// stop and ask, and nobody would see the card otherwise.
+    /// approvals and routine replies are taken: a turn the island did not
+    /// start can still stop and ask, or have something to tell, and nobody
+    /// would see either otherwise.
     private var watch: URLSessionDataTask?
     private var watchReader = VertusHubSupport.LineReader()
     /// The last event the watch saw, to resume after it on reconnect.
     private var watchSeq: Int?
+    /// Routine runs heard on the watch, collected until each one ends.
+    private var routineReplies = VertusRoutineReplies()
+    /// Routine names by id, asked for when a routine nobody has named yet
+    /// fires; a message that lands before the answer goes out unnamed.
+    private var routineNames: [String: String] = [:]
+    private var askingRoutineNames = false
     /// Stop pressed while the prompt was still being queued: sent as soon as
     /// the hub names the run.
     private var cancelPending = false
@@ -192,6 +199,7 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
 
     private func follow(_ run: String, token: String) {
         self.run = run
+        routineReplies.ignore(run: run)
         emit(.runStarted(run))
         reader = VertusHubSupport.LineReader()
         let task = session.dataTask(with: VertusHubSupport.events(run: run, token: token))
@@ -238,10 +246,15 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
         if dataTask === watch, !ended {
             for line in watchReader.append(data) {
                 if let seq = VertusHubSupport.sequence(line: line) { watchSeq = max(watchSeq ?? 0, seq) }
-                switch VertusHubSupport.event(line: line, run: nil) {
+                guard let watched = VertusHubSupport.watchEvent(line: line) else { continue }
+                switch watched.event {
                 case .approval(let approval): emit(.approval(approval))
                 case .approvalSettled(let id, let outcome): emit(.approvalSettled(id, outcome))
+                case .routineFired(let routine, _): nameRoutine(routine)
                 default: break
+                }
+                if let message = routineReplies.receive(watched.event, run: watched.run) {
+                    emit(.proactive(message.text, routine: routineNames[message.routine]))
                 }
             }
             return
@@ -256,9 +269,28 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
             case .error(let reason): endTurn(.turnFailed(reason))
             case .approval(let approval): emit(.approval(approval))
             case .approvalSettled(let id, let outcome): emit(.approvalSettled(id, outcome))
-            case .ignored, nil: break
+            case .routineFired, .ignored, nil: break
             }
         }
+    }
+
+    /// Asks the hub what its routines are called, once per routine the
+    /// island has not heard named. The run takes far longer than this
+    /// answer, so the name is almost always in before the message is.
+    private func nameRoutine(_ routine: String) {
+        guard routineNames[routine] == nil, !askingRoutineNames, !ended, let token else { return }
+        askingRoutineNames = true
+        var request = VertusHubSupport.routines(token: token)
+        request.timeoutInterval = Self.requestTimeout
+        session.dataTask(with: request) { [weak self] data, response, error in
+            guard let self else { return }
+            self.queue.async {
+                self.askingRoutineNames = false
+                guard !self.ended, error == nil,
+                      let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else { return }
+                self.routineNames.merge(VertusHubSupport.routineNames(from: data)) { _, new in new }
+            }
+        }.resume()
     }
 
     func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {

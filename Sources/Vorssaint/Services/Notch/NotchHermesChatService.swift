@@ -278,6 +278,11 @@ final class NotchHermesChatService: ObservableObject {
             answering.remove(id)
         case .runStarted(let run):
             currentRun = run
+        case .proactive(let words, let routine):
+            // A reply of the island's own turn may be writing below; it
+            // lands after this one, in the order the two finished.
+            append(NotchHermesChatMessage(role: .proactive, text: words, source: routine))
+            reachOut()
         case .finished(let stop):
             finish(stop)
         case .turnFailed(let reason):
@@ -388,6 +393,24 @@ final class NotchHermesChatService: ObservableObject {
         }
         notch.reactMascot(.surprised)
         notch.open(.hermesChat, pinned: true, takeFocus: false)
+    }
+
+    /// VERTUS has something to say, unasked. Nothing waits on it, so unlike
+    /// an approval it never pins the island and never takes the page the
+    /// person is using: on the conversation the message just lands, on
+    /// another page the companion reacts, and a closed island opens on the
+    /// conversation without the keyboard.
+    private func reachOut() {
+        let notch = NotchService.shared
+        switch NotchAgentReachOut.attention(expanded: notch.expanded, showingChat: notch.selected == .hermesChat) {
+        case .append:
+            return
+        case .nudge:
+            notch.reactMascot(.perk)
+        case .open:
+            notch.reactMascot(.perk)
+            notch.open(.hermesChat, pinned: false, takeFocus: false)
+        }
     }
 
     /// The companion is the agent's face. On the conversation's page it acts

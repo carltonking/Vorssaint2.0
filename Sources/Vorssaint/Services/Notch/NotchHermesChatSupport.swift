@@ -289,18 +289,24 @@ struct NotchHermesChatMessage: Identifiable, Equatable {
         case tool
         /// The island's own remark: a refusal, a stop, a failure.
         case note
+        /// VERTUS wrote first: a routine's reply nobody on the island asked
+        /// for, marked so it does not read as an answer to the line above.
+        case proactive
     }
 
     let id: UUID
     let role: Role
     var text: String
     let date: Date
+    /// The routine that wrote a proactive message, when the hub named it.
+    let source: String?
 
-    init(id: UUID = UUID(), role: Role, text: String, date: Date = Date()) {
+    init(id: UUID = UUID(), role: Role, text: String, date: Date = Date(), source: String? = nil) {
         self.id = id
         self.role = role
         self.text = text
         self.date = date
+        self.source = source
     }
 }
 

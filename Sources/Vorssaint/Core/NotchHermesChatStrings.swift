@@ -43,6 +43,8 @@ struct NotchHermesChatStrings {
     let approvalAllowed: String
     let approvalDenied: String
     let approvalExpired: String
+    let reachedOut: String
+    let reachedOutFormat: String
 
     func notFound(_ command: String) -> String { String(format: notFoundFormat, command) }
 
@@ -50,6 +52,13 @@ struct NotchHermesChatStrings {
 
     func refusedCommandLine(_ subject: String) -> String {
         String(format: refusedCommandFormat, subject)
+    }
+
+    /// The line over a message VERTUS sent unasked, naming the routine that
+    /// wrote it when the hub said which.
+    func reachedOut(_ routine: String?) -> String {
+        guard let routine, !routine.isEmpty else { return reachedOut }
+        return String(format: reachedOutFormat, routine)
     }
 }
 
@@ -113,7 +122,9 @@ extension NotchHermesChatStrings {
         deny: "Deny",
         approvalAllowed: "Allowed.",
         approvalDenied: "Denied.",
-        approvalExpired: "The request expired before an answer."
+        approvalExpired: "The request expired before an answer.",
+        reachedOut: "VERTUS reached out",
+        reachedOutFormat: "VERTUS reached out · %1$@"
     )
 
     static let ptBR = NotchHermesChatStrings(
@@ -153,7 +164,9 @@ extension NotchHermesChatStrings {
         deny: "Negar",
         approvalAllowed: "Permitido.",
         approvalDenied: "Negado.",
-        approvalExpired: "O pedido expirou antes de uma resposta."
+        approvalExpired: "O pedido expirou antes de uma resposta.",
+        reachedOut: "O VERTUS entrou em contato",
+        reachedOutFormat: "O VERTUS entrou em contato · %1$@"
     )
 
     static let es = NotchHermesChatStrings(
@@ -193,7 +206,9 @@ extension NotchHermesChatStrings {
         deny: "Denegar",
         approvalAllowed: "Permitido.",
         approvalDenied: "Denegado.",
-        approvalExpired: "La solicitud caducó antes de una respuesta."
+        approvalExpired: "La solicitud caducó antes de una respuesta.",
+        reachedOut: "VERTUS te escribió",
+        reachedOutFormat: "VERTUS te escribió · %1$@"
     )
 
     static let sk = NotchHermesChatStrings(
@@ -233,7 +248,9 @@ extension NotchHermesChatStrings {
         deny: "Zamietnuť",
         approvalAllowed: "Povolené.",
         approvalDenied: "Zamietnuté.",
-        approvalExpired: "Žiadosť vypršala skôr, než prišla odpoveď."
+        approvalExpired: "Žiadosť vypršala skôr, než prišla odpoveď.",
+        reachedOut: "VERTUS sa ozval",
+        reachedOutFormat: "VERTUS sa ozval · %1$@"
     )
 
     static let de = NotchHermesChatStrings(
@@ -273,7 +290,9 @@ extension NotchHermesChatStrings {
         deny: "Ablehnen",
         approvalAllowed: "Erlaubt.",
         approvalDenied: "Abgelehnt.",
-        approvalExpired: "Die Anfrage ist abgelaufen, bevor eine Antwort kam."
+        approvalExpired: "Die Anfrage ist abgelaufen, bevor eine Antwort kam.",
+        reachedOut: "VERTUS hat sich gemeldet",
+        reachedOutFormat: "VERTUS hat sich gemeldet · %1$@"
     )
 
     static let fr = NotchHermesChatStrings(
@@ -313,7 +332,9 @@ extension NotchHermesChatStrings {
         deny: "Refuser",
         approvalAllowed: "Autorisé.",
         approvalDenied: "Refusé.",
-        approvalExpired: "La demande a expiré avant une réponse."
+        approvalExpired: "La demande a expiré avant une réponse.",
+        reachedOut: "VERTUS vous a écrit",
+        reachedOutFormat: "VERTUS vous a écrit · %1$@"
     )
 
     static let it = NotchHermesChatStrings(
@@ -353,7 +374,9 @@ extension NotchHermesChatStrings {
         deny: "Nega",
         approvalAllowed: "Consentito.",
         approvalDenied: "Negato.",
-        approvalExpired: "La richiesta è scaduta prima di una risposta."
+        approvalExpired: "La richiesta è scaduta prima di una risposta.",
+        reachedOut: "VERTUS ti ha scritto",
+        reachedOutFormat: "VERTUS ti ha scritto · %1$@"
     )
 
     static let ru = NotchHermesChatStrings(
@@ -393,7 +416,9 @@ extension NotchHermesChatStrings {
         deny: "Запретить",
         approvalAllowed: "Разрешено.",
         approvalDenied: "Запрещено.",
-        approvalExpired: "Запрос истёк до ответа."
+        approvalExpired: "Запрос истёк до ответа.",
+        reachedOut: "VERTUS написал вам",
+        reachedOutFormat: "VERTUS написал вам · %1$@"
     )
 
     static let tr = NotchHermesChatStrings(
@@ -433,7 +458,9 @@ extension NotchHermesChatStrings {
         deny: "Reddet",
         approvalAllowed: "İzin verildi.",
         approvalDenied: "Reddedildi.",
-        approvalExpired: "İstek yanıtlanmadan süresi doldu."
+        approvalExpired: "İstek yanıtlanmadan süresi doldu.",
+        reachedOut: "VERTUS size yazdı",
+        reachedOutFormat: "VERTUS size yazdı · %1$@"
     )
 
     static let ja = NotchHermesChatStrings(
@@ -473,7 +500,9 @@ extension NotchHermesChatStrings {
         deny: "拒否",
         approvalAllowed: "許可しました。",
         approvalDenied: "拒否しました。",
-        approvalExpired: "応答する前に依頼の期限が切れました。"
+        approvalExpired: "応答する前に依頼の期限が切れました。",
+        reachedOut: "VERTUSから連絡がありました",
+        reachedOutFormat: "VERTUSから連絡がありました · %1$@"
     )
 
     static let ko = NotchHermesChatStrings(
@@ -513,7 +542,9 @@ extension NotchHermesChatStrings {
         deny: "거부",
         approvalAllowed: "허용했습니다.",
         approvalDenied: "거부했습니다.",
-        approvalExpired: "응답하기 전에 요청이 만료되었습니다."
+        approvalExpired: "응답하기 전에 요청이 만료되었습니다.",
+        reachedOut: "VERTUS가 먼저 연락했습니다",
+        reachedOutFormat: "VERTUS가 먼저 연락했습니다 · %1$@"
     )
 
     static let uk = NotchHermesChatStrings(
@@ -553,7 +584,9 @@ extension NotchHermesChatStrings {
         deny: "Заборонити",
         approvalAllowed: "Дозволено.",
         approvalDenied: "Заборонено.",
-        approvalExpired: "Запит сплив до відповіді."
+        approvalExpired: "Запит сплив до відповіді.",
+        reachedOut: "VERTUS написав вам",
+        reachedOutFormat: "VERTUS написав вам · %1$@"
     )
 
     static let zhHans = NotchHermesChatStrings(
@@ -593,7 +626,9 @@ extension NotchHermesChatStrings {
         deny: "拒绝",
         approvalAllowed: "已允许。",
         approvalDenied: "已拒绝。",
-        approvalExpired: "请求在回复前已过期。"
+        approvalExpired: "请求在回复前已过期。",
+        reachedOut: "VERTUS 主动联系了你",
+        reachedOutFormat: "VERTUS 主动联系了你 · %1$@"
     )
 
     static let zhTW = NotchHermesChatStrings(
@@ -633,7 +668,9 @@ extension NotchHermesChatStrings {
         deny: "拒絕",
         approvalAllowed: "已允許。",
         approvalDenied: "已拒絕。",
-        approvalExpired: "請求在回覆前已過期。"
+        approvalExpired: "請求在回覆前已過期。",
+        reachedOut: "VERTUS 主動聯絡了你",
+        reachedOutFormat: "VERTUS 主動聯絡了你 · %1$@"
     )
 
     static let zhHK = NotchHermesChatStrings(
@@ -673,6 +710,8 @@ extension NotchHermesChatStrings {
         deny: "拒絕",
         approvalAllowed: "已允許。",
         approvalDenied: "已拒絕。",
-        approvalExpired: "請求在回覆前已逾時。"
+        approvalExpired: "請求在回覆前已逾時。",
+        reachedOut: "VERTUS 主動聯絡你",
+        reachedOutFormat: "VERTUS 主動聯絡你 · %1$@"
     )
 }

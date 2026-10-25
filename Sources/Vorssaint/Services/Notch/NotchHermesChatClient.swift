@@ -43,6 +43,9 @@ final class NotchHermesChatClient {
         case approvalAnswerFailed(String)
         /// The hub named the run carrying the turn just sent.
         case runStarted(String)
+        /// VERTUS wrote on its own: a routine's finished reply, with the
+        /// routine's name when the hub gave one. Only the hub sends these.
+        case proactive(String, routine: String?)
         /// One turn could not finish, but the conversation goes on; the text
         /// is why. The hub reports a run's own failure this way.
         case turnFailed(String)
