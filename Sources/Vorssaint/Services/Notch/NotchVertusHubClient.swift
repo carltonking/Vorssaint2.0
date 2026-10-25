@@ -58,6 +58,11 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
     /// stop and ask, and nobody would see the card otherwise.
     private var watch: URLSessionDataTask?
     private var watchReader = VertusHubSupport.LineReader()
+    /// The last event the watch saw, to resume after it on reconnect.
+    private var watchSeq: Int?
+    /// Stop pressed while the prompt was still being queued: sent as soon as
+    /// the hub names the run.
+    private var cancelPending = false
     private var turnEnded = false
     private var ended = false
 
@@ -103,6 +108,7 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
             var request = VertusHubSupport.prompt(text, token: token)
             request.timeoutInterval = Self.requestTimeout
             self.turnEnded = false
+            self.cancelPending = false
             self.session.dataTask(with: request) { [weak self] data, response, error in
                 guard let self else { return }
                 self.queue.async {
@@ -125,24 +131,34 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
     /// which ends the turn the usual way.
     func cancel() {
         queue.async {
-            guard !self.ended, let run = self.run, let token = self.token else { return }
+            guard !self.ended, !self.turnEnded, let token = self.token else { return }
+            guard let run = self.run else {
+                self.cancelPending = true
+                return
+            }
             self.session.dataTask(with: VertusHubSupport.cancel(run: run, token: token)).resume()
         }
     }
 
-    /// The hub routes the answer to the waiting engine; the run's stream
-    /// then reports it settled, which is what clears the card. A refused
-    /// answer (already settled elsewhere) is reported the same way.
+    /// The hub routes the answer to the waiting engine; the stream then
+    /// reports it settled, which is what clears the card. An approval the hub
+    /// says is already settled is cleared with how it ended; an answer that
+    /// did not get through leaves the card answerable.
     func answer(_ approval: String, choice: NotchAgentApproval.Choice) {
         queue.async {
             guard !self.ended, let token = self.token else { return }
             var request = VertusHubSupport.answer(approval, choice: choice, token: token)
             request.timeoutInterval = Self.requestTimeout
-            self.session.dataTask(with: request) { [weak self] _, response, error in
+            self.session.dataTask(with: request) { [weak self] data, response, error in
                 guard let self else { return }
-                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-                if error != nil || !(200..<300).contains(status) {
-                    self.emit(.approvalSettled(approval, .expired))
+                self.queue.async {
+                    guard !self.ended else { return }
+                    let status = error == nil ? (response as? HTTPURLResponse)?.statusCode ?? 0 : 0
+                    switch VertusHubSupport.answerResult(status: status, data: data) {
+                    case .accepted: break
+                    case .settled(let outcome): self.emit(.approvalSettled(approval, outcome))
+                    case .retry: self.emit(.approvalAnswerFailed(approval))
+                    }
                 }
             }.resume()
         }
@@ -165,16 +181,44 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
 
     private func follow(_ run: String, token: String) {
         self.run = run
+        emit(.runStarted(run))
         reader = VertusHubSupport.LineReader()
         let task = session.dataTask(with: VertusHubSupport.events(run: run, token: token))
         stream = task
         task.resume()
+        if cancelPending {
+            cancelPending = false
+            session.dataTask(with: VertusHubSupport.cancel(run: run, token: token)).resume()
+        }
     }
 
+    /// Holds the agent-wide watch. The first time, it starts from the ledger's
+    /// waiting approvals, which a live stream cannot replay; after a drop it
+    /// resumes from the last event it saw, so nothing raised in between is
+    /// missed.
     private func listen() {
         guard !ended, watch == nil, let token else { return }
         watchReader = VertusHubSupport.LineReader()
-        let task = session.dataTask(with: VertusHubSupport.watch(token: token))
+        if let since = watchSeq {
+            openWatch(VertusHubSupport.watch(token: token, since: since))
+            return
+        }
+        var pending = VertusHubSupport.pendingApprovals(token: token)
+        pending.timeoutInterval = Self.requestTimeout
+        session.dataTask(with: pending) { [weak self] data, response, _ in
+            guard let self else { return }
+            self.queue.async {
+                guard !self.ended, self.watch == nil else { return }
+                if let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) {
+                    for approval in VertusHubSupport.pendingApprovals(from: data) { self.emit(.approval(approval)) }
+                }
+                self.openWatch(VertusHubSupport.watch(token: token))
+            }
+        }.resume()
+    }
+
+    private func openWatch(_ request: URLRequest) {
+        let task = session.dataTask(with: request)
         watch = task
         task.resume()
     }
@@ -182,6 +226,7 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         if dataTask === watch, !ended {
             for line in watchReader.append(data) {
+                if let seq = VertusHubSupport.sequence(line: line) { watchSeq = max(watchSeq ?? 0, seq) }
                 switch VertusHubSupport.event(line: line, run: nil) {
                 case .approval(let approval): emit(.approval(approval))
                 case .approvalSettled(let id, let outcome): emit(.approvalSettled(id, outcome))
@@ -218,7 +263,9 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
         // The hub closes a run's stream after its terminal event; closing
         // before one means the run's end was never heard.
         let status = (task.response as? HTTPURLResponse)?.statusCode ?? 0
-        endTurn(.turnFailed(Self.reason(error, status: status)))
+        endTurn(.turnFailed(error == nil && (200..<300).contains(status)
+                            ? "The reply ended before it finished."
+                            : Self.reason(error, status: status)))
     }
 
     /// One terminal event per turn: the hub can repeat `done`, and the stream
@@ -232,11 +279,17 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
         emit(event)
     }
 
+    /// The conversation cannot go on. The session is released here too: the
+    /// service's later end() finds the client already ended, and a session
+    /// left alive would keep this client (its delegate) alive with it.
     private func finish(_ event: Event) {
         guard !ended else { return }
         ended = true
         stream?.cancel()
         stream = nil
+        watch?.cancel()
+        watch = nil
+        session.invalidateAndCancel()
         emit(event)
     }
 

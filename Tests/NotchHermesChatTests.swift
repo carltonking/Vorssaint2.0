@@ -496,6 +496,38 @@ enum NotchHermesChatTests {
         let watch = VertusHubSupport.watch(token: "t")
         suite.expect(watch.url?.path == "/api/events" && watch.url?.query == "agent_id=primary",
                      "the watch follows the hub's own agent, every run")
+        suite.expect(VertusHubSupport.watch(token: "t", since: 412).url?.query == "agent_id=primary&since=412",
+                     "a watch that dropped resumes after the last event it saw")
+        suite.expect(VertusHubSupport.sequence(line: #"data: {"type":"text","seq":412}"#) == 412
+                     && VertusHubSupport.sequence(line: ": ping") == nil, "every streamed event names its place")
+        suite.expect(request.flatMap { if case .approval(let a) = $0 { return a.runID } else { return nil } } == "r1",
+                     "an approval remembers the turn that is waiting on it")
+
+        // Waiting approvals the watch cannot replay come from the ledger:
+        // only the hub agent's undecided rows, oldest first.
+        let ledger = try? JSONSerialization.data(withJSONObject: ["approvals": [
+            ["approval_id": "new", "agent_id": "primary", "run_id": "r5", "action": "VERTUS wants to push",
+             "target": "<terminal> (plugin approval rule)", "decision": NSNull()],
+            ["approval_id": "other-bot", "agent_id": "alpha", "action": "x", "target": "", "decision": NSNull()],
+            ["approval_id": "old", "agent_id": "primary", "action": "recursive delete", "target": "rm -rf b",
+             "decision": NSNull()],
+        ]])
+        let restored = VertusHubSupport.pendingApprovals(from: ledger)
+        suite.expect(restored.map(\.id) == ["old", "new"] && restored.last?.runID == "r5"
+                     && restored.allSatisfy { $0.choices == [.once, .deny] },
+                     "approvals already waiting are restored, the hub agent's only, with the answers every one takes")
+
+        func json(_ object: [String: Any]) -> Data? { try? JSONSerialization.data(withJSONObject: object) }
+        suite.expect(VertusHubSupport.answerResult(status: 200, data: nil) == .accepted
+                     && VertusHubSupport.answerResult(status: 404, data: nil) == .settled(.expired)
+                     && VertusHubSupport.answerResult(status: 409, data: json(["error": "approval already settled: always"]))
+                        == .settled(.allowed)
+                     && VertusHubSupport.answerResult(status: 409, data: json(["error": "approval already settled: deny"]))
+                        == .settled(.denied),
+                     "an approval settled elsewhere clears with how it really ended")
+        suite.expect(VertusHubSupport.answerResult(status: 0, data: nil) == .retry
+                     && VertusHubSupport.answerResult(status: 500, data: nil) == .retry,
+                     "an answer that did not get through leaves the approval answerable")
 
         let answer = VertusHubSupport.answer("a1", choice: .session, token: "t")
         let body = answer.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]

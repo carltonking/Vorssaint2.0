@@ -58,6 +58,14 @@ final class NotchHermesChatService: ObservableObject {
     @Published private(set) var modelName: String?
 
     private var client: NotchAgentChatTransport?
+    /// Which client's events count: one replaced by retry() or ended by
+    /// stop() can still have events queued on the main thread.
+    private var generation = UUID()
+    /// The hub run carrying the island's own turn, once the hub names it.
+    private var currentRun: String?
+    /// The island was pinned open for an approval, so it is unpinned when the
+    /// last one settles rather than staying open for good.
+    private var pinnedForApproval = false
     /// The message typed while the turn before it was still writing.
     private var heldMessage: String?
 
@@ -97,6 +105,9 @@ final class NotchHermesChatService: ObservableObject {
     func stop() {
         client?.end()
         client = nil
+        generation = UUID()
+        currentRun = nil
+        releasePin()
         heldMessage = nil
         if state != .off { state = .off }
         if !messages.isEmpty { messages = [] }
@@ -113,6 +124,8 @@ final class NotchHermesChatService: ObservableObject {
     func retry() {
         client?.end()
         client = nil
+        generation = UUID()
+        currentRun = nil
         connect()
     }
 
@@ -123,7 +136,12 @@ final class NotchHermesChatService: ObservableObject {
         // surface, rather than a second engine with its own model and memory.
         if VertusHubSupport.token(home: home) != nil {
             if state != .connecting { state = .connecting }
-            let hub = NotchVertusHubClient(home: home) { [weak self] event in self?.handle(event) }
+            let current = UUID()
+            generation = current
+            let hub = NotchVertusHubClient(home: home) { [weak self] event in
+                guard let self, self.generation == current else { return }
+                self.handle(event)
+            }
             client = hub
             hub.start()
             return
@@ -138,12 +156,15 @@ final class NotchHermesChatService: ObservableObject {
             return
         }
         if state != .connecting { state = .connecting }
+        let current = UUID()
+        generation = current
         let client = NotchHermesChatClient(
             executable: executable,
             environment: HermesACPSupport.environment(executable: executable, searchPath: nil),
             workingDirectory: HermesACPSupport.workingDirectory(home: home)
         ) { [weak self] event in
-            self?.handle(event)
+            guard let self, self.generation == current else { return }
+            self.handle(event)
         }
         guard let client else {
             state = .failed(.unreachable(NotchHermesChatClient.Event.unreachable))
@@ -251,11 +272,18 @@ final class NotchHermesChatService: ObservableObject {
             guard approvals.contains(where: { $0.id == id }) else { return }
             approvals.removeAll { $0.id == id }
             append(NotchHermesChatMessage(role: .note, text: line(for: outcome)))
+            if approvals.isEmpty { releasePin() }
+        case .approvalAnswerFailed(let id):
+            // Still waiting on the hub: the card becomes answerable again.
+            answering.remove(id)
+        case .runStarted(let run):
+            currentRun = run
         case .finished(let stop):
             finish(stop)
         case .turnFailed(let reason):
             // What was written before the failure stays, above the reason.
             commitReply()
+            expireOwnApprovals()
             append(NotchHermesChatMessage(role: .note, text: text.unreachable(reason)))
             finish(.endTurn)
         case .failed(let reason):
@@ -266,11 +294,8 @@ final class NotchHermesChatService: ObservableObject {
     private func finish(_ stop: HermesACPProtocol.Stop) {
         let wrote = !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         commitReply()
-        // A turn that ended took its unanswered approvals with it: the engine
-        // withdrew them and fails those actions closed.
-        for _ in approvals { append(NotchHermesChatMessage(role: .note, text: line(for: .expired))) }
-        if !approvals.isEmpty { approvals = [] }
-        if !answering.isEmpty { answering = [] }
+        expireOwnApprovals()
+        currentRun = nil
         if stop.wasCancelled {
             if !wrote { append(NotchHermesChatMessage(role: .note, text: text.stopped)) }
         } else if let line = stopNote(stop) {
@@ -320,6 +345,27 @@ final class NotchHermesChatService: ObservableObject {
         append(NotchHermesChatMessage(role: .hermes, text: words))
     }
 
+    /// The island's own turn ended and took its unanswered approvals with it:
+    /// the engine withdrew them and failed those actions closed. Approvals of
+    /// other turns (a routine, the terminal) are still waiting and stay.
+    private func expireOwnApprovals() {
+        guard let run = currentRun else { return }
+        let own = approvals.filter { $0.runID == run }
+        guard !own.isEmpty else { return }
+        for approval in own {
+            answering.remove(approval.id)
+            append(NotchHermesChatMessage(role: .note, text: line(for: .expired)))
+        }
+        approvals.removeAll { $0.runID == run }
+        if approvals.isEmpty { releasePin() }
+    }
+
+    private func releasePin() {
+        guard pinnedForApproval else { return }
+        pinnedForApproval = false
+        NotchService.shared.pinned = false
+    }
+
     private func line(for outcome: NotchAgentApproval.Outcome) -> String {
         switch outcome {
         case .allowed: return text.approvalAllowed
@@ -333,9 +379,15 @@ final class NotchHermesChatService: ObservableObject {
     /// without taking the keyboard from whatever is being typed.
     private func requestAttention() {
         let notch = NotchService.shared
-        if notch.expanded && notch.selected == .hermesChat { return }
+        // Pinned, so moving the pointer away or switching apps does not put
+        // the card away while the agent waits; unpinned once all settle.
+        if !notch.pinned { pinnedForApproval = true }
+        if notch.expanded && notch.selected == .hermesChat {
+            notch.pinned = true
+            return
+        }
         notch.reactMascot(.surprised)
-        notch.open(.hermesChat, takeFocus: false)
+        notch.open(.hermesChat, pinned: true, takeFocus: false)
     }
 
     /// The companion is the agent's face. On the conversation's page it acts

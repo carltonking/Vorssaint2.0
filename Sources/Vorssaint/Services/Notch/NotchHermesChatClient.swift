@@ -39,6 +39,10 @@ final class NotchHermesChatClient {
         case approval(NotchAgentApproval)
         /// An approval was answered, here or on another surface, or expired.
         case approvalSettled(String, NotchAgentApproval.Outcome)
+        /// An answer did not reach the hub; the approval is still waiting.
+        case approvalAnswerFailed(String)
+        /// The hub named the run carrying the turn just sent.
+        case runStarted(String)
         /// One turn could not finish, but the conversation goes on; the text
         /// is why. The hub reports a run's own failure this way.
         case turnFailed(String)

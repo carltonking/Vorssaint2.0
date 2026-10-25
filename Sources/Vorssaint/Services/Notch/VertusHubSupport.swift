@@ -71,11 +71,21 @@ enum VertusHubSupport {
     /// The agent's live stream, every run included: how an approval asked
     /// by a turn that started elsewhere (a routine, the terminal) still
     /// reaches the island.
-    static func watch(token: String) -> URLRequest {
-        var request = request("api/events", token: token,
-                              query: [URLQueryItem(name: "agent_id", value: agentID)])
+    /// With `since`, the hub first replays what it stored after that event,
+    /// so a watch that dropped and reconnects misses nothing in between.
+    static func watch(token: String, since: Int? = nil) -> URLRequest {
+        var query = [URLQueryItem(name: "agent_id", value: agentID)]
+        if let since { query.append(URLQueryItem(name: "since", value: String(since))) }
+        var request = request("api/events", token: token, query: query)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
         return request
+    }
+
+    /// The approvals still waiting, from the hub's ledger: what a watch that
+    /// just connected cannot have seen arrive.
+    static func pendingApprovals(token: String) -> URLRequest {
+        request("api/approvals", token: token,
+                query: [URLQueryItem(name: "state", value: "pending"), URLQueryItem(name: "limit", value: "50")])
     }
 
     static func cancel(run: String, token: String) -> URLRequest {
@@ -109,6 +119,54 @@ enum VertusHubSupport {
         let agents = (object as? [String: Any])?["agents"] as? [[String: Any]] ?? object as? [[String: Any]] ?? []
         let agent = agents.first { $0["id"] as? String == agentID }
         return (agent?["model"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    /// The hub's own agent's waiting approvals, oldest first. The ledger
+    /// keeps no list of accepted answers, so a card restored from it offers
+    /// the two every approval takes.
+    static func pendingApprovals(from data: Data?) -> [NotchAgentApproval] {
+        let object = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        let rows = object?["approvals"] as? [[String: Any]] ?? []
+        return rows.reversed().compactMap { row in
+            guard row["agent_id"] as? String == agentID, row["decision"] == nil || row["decision"] is NSNull,
+                  let id = row["approval_id"] as? String, !id.isEmpty else { return nil }
+            return NotchAgentApproval(id: id, description: row["action"] as? String ?? "",
+                                      command: row["target"] as? String ?? "", choices: [.once, .deny],
+                                      runID: row["run_id"] as? String)
+        }
+    }
+
+    /// What the hub said to an answer.
+    enum AnswerResult: Equatable {
+        /// The engine has it; the settling arrives on the stream.
+        case accepted
+        /// Nothing waits on it any more: answered elsewhere, or expired.
+        case settled(NotchAgentApproval.Outcome)
+        /// The answer did not get through; the card stays answerable.
+        case retry
+    }
+
+    static func answerResult(status: Int, data: Data?) -> AnswerResult {
+        switch status {
+        case 200..<300: return .accepted
+        case 404: return .settled(.expired)
+        case 409:
+            // "approval already settled: <decision>"
+            let object = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+            let reason = object?["error"] as? String ?? ""
+            let decision = reason.range(of: "settled: ").map { String(reason[$0.upperBound...]) }
+            return .settled(NotchAgentApproval.Outcome(decision: decision?.trimmingCharacters(in: .whitespaces)))
+        default: return .retry
+        }
+    }
+
+    /// The hub's sequence number of one streamed event, so a watch can resume
+    /// after it.
+    static func sequence(line: String) -> Int? {
+        guard line.hasPrefix("data:"),
+              let data = line.dropFirst(5).trimmingCharacters(in: .whitespaces).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (object["seq"] as? NSNumber)?.intValue
     }
 
     struct HubError: Error, Equatable {
@@ -177,7 +235,8 @@ enum VertusHubSupport {
                 id: id,
                 description: object["description"] as? String ?? "",
                 command: object["command"] as? String ?? "",
-                choices: choices.isEmpty ? [.once, .deny] : choices))
+                choices: choices.isEmpty ? [.once, .deny] : choices,
+                runID: (object["run_id"] as? String).flatMap { $0.isEmpty ? nil : $0 }))
         case "approval_resolved":
             guard let id = object["approval_id"] as? String, !id.isEmpty else { return .ignored }
             return .approvalSettled(id, NotchAgentApproval.Outcome(decision: object["decision"] as? String))
@@ -233,6 +292,9 @@ struct NotchAgentApproval: Equatable, Identifiable {
     let description: String
     let command: String
     let choices: [Choice]
+    /// The turn that is waiting. The island's own turn ending expires only
+    /// its own approvals; a routine's or the terminal's keep waiting.
+    var runID: String? = nil
 
     /// What the card says: the engine's description, which for VERTUS's own
     /// rules already names the command ("VERTUS wants to delete files: rm …").
