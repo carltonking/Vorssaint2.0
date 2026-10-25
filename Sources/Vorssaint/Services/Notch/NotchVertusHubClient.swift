@@ -50,6 +50,9 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
 
     // Only touched on `queue`.
     private var token: String?
+    /// Read at start, like the token; without it the island can show an
+    /// approval but not answer it.
+    private var approverToken: String?
     private var run: String?
     private var stream: URLSessionDataTask?
     private var reader = VertusHubSupport.LineReader()
@@ -82,6 +85,7 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
                 return
             }
             self.token = token
+            self.approverToken = VertusHubSupport.approverToken(home: self.home)
             var request = VertusHubSupport.request("api/agents", token: token)
             request.timeoutInterval = Self.requestTimeout
             self.session.dataTask(with: request) { [weak self] data, response, error in
@@ -147,7 +151,14 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
     func answer(_ approval: String, choice: NotchAgentApproval.Choice) {
         queue.async {
             guard !self.ended, let token = self.token else { return }
-            var request = VertusHubSupport.answer(approval, choice: choice, token: token)
+            // An older hub without an approver credential: answering is not
+            // possible, so the card stays answerable for another surface.
+            guard let approverToken = self.approverToken ?? VertusHubSupport.approverToken(home: self.home) else {
+                self.emit(.approvalAnswerFailed(approval))
+                return
+            }
+            self.approverToken = approverToken
+            var request = VertusHubSupport.answer(approval, choice: choice, token: token, approverToken: approverToken)
             request.timeoutInterval = Self.requestTimeout
             self.session.dataTask(with: request) { [weak self] data, response, error in
                 guard let self else { return }

@@ -529,7 +529,7 @@ enum NotchHermesChatTests {
                      && VertusHubSupport.answerResult(status: 500, data: nil) == .retry,
                      "an answer that did not get through leaves the approval answerable")
 
-        let answer = VertusHubSupport.answer("a1", choice: .session, token: "t")
+        let answer = VertusHubSupport.answer("a1", choice: .session, token: "t", approverToken: "ap")
         let body = answer.httpBody.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
         suite.expect(answer.httpMethod == "POST" && answer.url?.path == "/api/approvals/a1"
                      && body?["choice"] as? String == "session",
@@ -537,5 +537,9 @@ enum NotchHermesChatTests {
         suite.expect(answer.value(forHTTPHeaderField: "X-Vertus-Client") == "island"
                      && answer.value(forHTTPHeaderField: "Authorization") == "Bearer t",
                      "an answer carries the token and is credited to the island")
+        suite.expect(answer.value(forHTTPHeaderField: "X-Vertus-Approver") == "ap",
+                     "an answer carries the approver credential no agent is given")
+        suite.expect(VertusHubSupport.approverTokenURL(home: URL(fileURLWithPath: "/Users/x")).path
+                     == "/Users/x/.vertus/approver-token", "the approver credential lives beside the hub's token")
     }
 }

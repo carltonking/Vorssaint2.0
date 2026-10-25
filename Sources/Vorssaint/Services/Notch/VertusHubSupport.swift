@@ -27,9 +27,23 @@ enum VertusHubSupport {
         home.appendingPathComponent(".vertus/token", isDirectory: false)
     }
 
+    /// The credential that answers approvals, on top of the bearer token.
+    /// The hub creates it for the person's own clients; its agents are never
+    /// given it, so none of them can approve its own request.
+    static func approverTokenURL(home: URL) -> URL {
+        home.appendingPathComponent(".vertus/approver-token", isDirectory: false)
+    }
+
+    static func approverToken(home: URL, fileManager: FileManager = .default) -> String? {
+        secret(at: approverTokenURL(home: home), fileManager: fileManager)
+    }
+
     /// The token, trimmed, or nil when the hub is not installed here.
     static func token(home: URL, fileManager: FileManager = .default) -> String? {
-        let url = tokenURL(home: home)
+        secret(at: tokenURL(home: home), fileManager: fileManager)
+    }
+
+    private static func secret(at url: URL, fileManager: FileManager) -> String? {
         guard fileManager.isReadableFile(atPath: url.path),
               let raw = try? String(contentsOf: url, encoding: .utf8) else { return nil }
         let token = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -94,10 +108,12 @@ enum VertusHubSupport {
 
     /// Answers an approval the agent is waiting on. The hub credits the
     /// decision to the client named in `X-Vertus-Client`.
-    static func answer(_ approval: String, choice: NotchAgentApproval.Choice, token: String) -> URLRequest {
+    static func answer(_ approval: String, choice: NotchAgentApproval.Choice, token: String,
+                       approverToken: String) -> URLRequest {
         var request = request("api/approvals/\(approval)", token: token, method: "POST",
                               body: ["choice": choice.rawValue])
         request.setValue("island", forHTTPHeaderField: "X-Vertus-Client")
+        request.setValue(approverToken, forHTTPHeaderField: "X-Vertus-Approver")
         return request
     }
 
