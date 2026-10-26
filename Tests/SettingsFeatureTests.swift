@@ -227,14 +227,17 @@ enum SettingsFeatureTests {
                "camera preview preferences travel with the settings backup")
         suite.expect(backupKeys.contains(DefaultsKey.scratchpadShortcut)
                 && backupKeys.contains(DefaultsKey.scratchpadShortcutEnabled)
-                && backupKeys.contains(DefaultsKey.scratchpadRetention)
                 && backupKeys.contains(DefaultsKey.scratchpadCloseOnClickOutside)
                 && backupKeys.contains(DefaultsKey.scratchpadBackgroundOpacity)
                 && backupKeys.contains(DefaultsKey.panelUtilityScratchpad)
-                // The pad's own text is the user's material, kept in the app's
-                // private container instead (issue #1197).
+                // The vault and the open notes belong to this Mac; the notes
+                // themselves are files in the user's vault (issue #1197).
+                && !backupKeys.contains(DefaultsKey.scratchpadVaultPath)
+                && !backupKeys.contains(DefaultsKey.scratchpadVaultBookmark)
+                && !backupKeys.contains(DefaultsKey.scratchpadOpenNotes)
+                && !backupKeys.contains(DefaultsKey.scratchpadSelectedNote)
                 && !backupKeys.contains(DefaultsKey.scratchpadDocument),
-               "scratchpad preferences travel with the settings backup, its text does not")
+               "scratchpad preferences travel with the settings backup, the vault does not")
         suite.expect(backupKeys.contains(DefaultsKey.radialMenuEnabled)
                 && backupKeys.contains(DefaultsKey.radialMenuShortcut)
                 && backupKeys.contains(DefaultsKey.radialMenuAtPointer)

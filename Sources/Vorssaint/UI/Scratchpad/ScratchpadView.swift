@@ -59,18 +59,8 @@ struct ScratchpadView: View {
                     service.renamePad(pad.id, to: renameDraft)
                     dismissDialog()
                 }
-            case .close(let pad):
-                Button(text.cancel, role: .cancel) { dismissDialog() }
-                Button(text.closePad, role: .destructive) {
-                    _ = service.closePad(pad.id)
-                    dismissDialog()
-                }
             case nil:
                 EmptyView()
-            }
-        } message: {
-            if case .close(let pad) = dialog {
-                Text(String(format: text.deletePadMessageFormat, pad.name))
             }
         }
         .onChange(of: service.keyboardCloseSelectedPadSerial) { _, _ in
@@ -105,6 +95,18 @@ struct ScratchpadView: View {
             }
 
             Button {
+                service.openExistingNote()
+            } label: {
+                Image(systemName: "folder")
+                    .font(.system(size: 12, weight: .semibold))
+                    .frame(width: 22, height: 22)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(text.openNote)
+            .accessibilityLabel(text.openNote)
+
+            Button {
                 service.createPad(defaultName: text.pageTitle)
             } label: {
                 Image(systemName: "plus")
@@ -120,9 +122,11 @@ struct ScratchpadView: View {
             .accessibilityLabel(text.newPad)
 
             Menu {
+                Button(text.openNote) { service.openExistingNote() }
+                Divider()
                 if let selectedPad {
                     Button(text.renamePad) { presentRename(selectedPad) }
-                    Button(text.closePad, role: .destructive) { requestClose(selectedPad) }
+                    Button(text.closePad) { requestClose(selectedPad) }
                         .disabled(!service.canClosePad)
                 }
             } label: {
@@ -196,7 +200,7 @@ struct ScratchpadView: View {
         }
         .contextMenu {
             Button(text.renamePad) { presentRename(pad) }
-            Button(text.closePad, role: .destructive) { requestClose(pad) }
+            Button(text.closePad) { requestClose(pad) }
                 .disabled(!service.canClosePad)
         }
         .accessibilityLabel(pad.name)
@@ -210,7 +214,6 @@ struct ScratchpadView: View {
     private var dialogTitle: String {
         switch dialog {
         case .rename: return text.renamePad
-        case .close: return text.closePad
         case nil: return ""
         }
     }
@@ -228,14 +231,10 @@ struct ScratchpadView: View {
         service.setModalInteractionActive(true)
     }
 
+    /// Closing never deletes the note, so there is nothing to confirm.
     private func requestClose(_ pad: ScratchpadPad) {
         guard service.canClosePad else { return }
-        if !ScratchpadSupport.requiresCloseConfirmation(pad) {
-            _ = service.closePad(pad.id)
-        } else {
-            dialog = .close(pad)
-            service.setModalInteractionActive(true)
-        }
+        _ = service.closePad(pad.id)
     }
 
     private func dismissDialog() {
@@ -296,6 +295,9 @@ struct ScratchpadView: View {
                             continuesLists: true,
                             onCommandReturn: { service.togglePreview() },
                             isActive: !service.isPreviewing,
+                            livePreview: true,
+                            onToggleTask: { service.toggleTask(box: $0) },
+                            onOpenWikilink: { service.openLinkedNote($0) },
                             onCreate: { ScratchpadService.shared.registerTextView($0) })
                 .opacity(service.isPreviewing ? 0 : 1)
                 .allowsHitTesting(!service.isPreviewing)
@@ -390,7 +392,6 @@ struct ScratchpadView: View {
 
 private enum ScratchpadDialog {
     case rename(ScratchpadPad)
-    case close(ScratchpadPad)
 }
 
 /// A transparent strip over the header that moves the whole panel when

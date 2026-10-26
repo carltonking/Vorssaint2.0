@@ -60,6 +60,7 @@ enum NotchCompactTests {
         @Published var pads: [ScratchpadPad] = []
         @Published var selectedPadID: UUID?
         @Published var saveFailed = false
+        @Published var vaultPath: String? = "/vault"
         var canCreatePad: Bool { true }
         var canClosePad: Bool { false }
         var selectedPadName: String { "pad" }
@@ -73,6 +74,9 @@ enum NotchCompactTests {
         func closePad(_ id: UUID) -> Bool { true }
         func renamePad(_ id: UUID, to name: String) {}
         func selectPad(_ id: UUID) {}
+        func openLinkedNote(_ target: String) {}
+        func vaultNoteTree() -> [ScratchpadVaultNode] { [] }
+        func openVaultNote(_ path: String) {}
         func copyAll() {}
         func apply(_ mark: ScratchpadMark, through editor: NSTextView? = nil) {}
         @Published var marksExpanded = false

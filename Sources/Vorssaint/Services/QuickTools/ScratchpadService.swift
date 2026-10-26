@@ -25,6 +25,8 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     @Published private(set) var marksExpanded = false
     @Published private(set) var pads: [ScratchpadPad] = []
     @Published private(set) var selectedPadID: UUID?
+    /// The chosen Obsidian vault, shown in Settings; nil until one is picked.
+    @Published private(set) var vaultPath: String?
     /// Both pads show this in place until a write succeeds again.
     @Published private(set) var saveFailed = false
     /// Bumped when Command-W asks the view to close the selected tab
@@ -48,8 +50,9 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     private weak var textView: NSTextView?
     private var pendingSave: DispatchWorkItem?
     private var document: ScratchpadDocument?
-    private var store = ScratchpadStore(directoryURL: PrivateFileStore.containerURL,
-                                        defaults: .standard)
+    private var store = ScratchpadStore(vaultURL: nil, defaults: .standard)
+    private var vaultURL: URL?
+    private var scopedVaultURL: URL?
     private var hasLoaded = false
     private var isReplacingText = false
     private(set) var modalInteractionActive = false
@@ -57,6 +60,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     private override init() {
         super.init()
         hotkey.onPress = { [weak self] in self?.toggle() }
+        refreshVault()
     }
 
     func syncWithPreferences() {
@@ -88,6 +92,12 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     /// always lands the caret in the text.
     func toggle() {
         guard !modalInteractionActive else { return }
+        refreshVault()
+        guard vaultURL != nil else {
+            QuickToolHUD.show(icon: "folder.badge.questionmark",
+                              message: FeatureStrings.scratchpad(L10n.shared.language).vaultMissing)
+            return
+        }
         if NotchService.shared.showScratchpad(toggle: true) {
             if isVisible { hide() }
             return
@@ -103,6 +113,12 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     /// to the floating pad instead of routing it back into the island.
     func show(allowsIsland: Bool = true) {
         guard AppFeature.scratchpad.isAvailable, !modalInteractionActive else { return }
+        let strings = FeatureStrings.scratchpad(L10n.shared.language)
+        refreshVault()
+        guard vaultURL != nil else {
+            QuickToolHUD.show(icon: "folder.badge.questionmark", message: strings.vaultMissing)
+            return
+        }
         if allowsIsland, NotchService.shared.showScratchpad() {
             if isVisible { hide() }
             return
@@ -114,10 +130,8 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         isPreviewing = false
         marksExpanded = false
         isPinned = !closesOnClickOutside
-        guard loadApplyingRetention() else {
-            QuickToolHUD.show(
-                icon: "exclamationmark.triangle",
-                message: FeatureStrings.scratchpad(L10n.shared.language).loadFailed)
+        guard load() else {
+            QuickToolHUD.show(icon: "exclamationmark.triangle", message: strings.loadFailed)
             return
         }
         let panel = ensurePanel()
@@ -136,12 +150,14 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         }
     }
 
-    /// The island edits the same document in place: load it (or the current
-    /// copy) without showing the floating pad, and commit when it leaves.
+    /// The island edits the same notes in place: load them from the vault
+    /// without showing the floating pad, and commit when it leaves.
     func loadForEmbedding() -> Bool {
         guard AppFeature.scratchpad.isAvailable else { return false }
         marksExpanded = false
-        return loadApplyingRetention()
+        refreshVault()
+        guard vaultURL != nil else { return false }
+        return load()
     }
 
     /// The inline warning leaves with the pad or the island, so a final
@@ -167,18 +183,23 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
 
     // MARK: - Document
 
+    /// The open pad rereads its files each time it is brought back, so a note
+    /// edited in Obsidian shows the newer text here. Unsaved edits stay in
+    /// memory instead of being replaced by the older file.
     @discardableResult
-    private func loadApplyingRetention() -> Bool {
-        if hasLoaded, let document, document != store.lastSavedDocument {
-            flushSave()
-            return true
+    private func load() -> Bool {
+        refreshVault()
+        guard vaultURL != nil else {
+            hasLoaded = false
+            return false
         }
-        let defaults = UserDefaults.standard
+        if hasLoaded {
+            flushSave()
+            if saveFailed { return true }
+        }
         let defaultName = FeatureStrings.scratchpad(L10n.shared.language).pageTitle
-        let retention = ScratchpadRetention.sanitized(
-            defaults.string(forKey: DefaultsKey.scratchpadRetention))
         do {
-            let loaded = try store.load(defaultName: defaultName, retention: retention, now: Date())
+            let loaded = try store.load(defaultName: defaultName)
             apply(loaded)
             hasLoaded = true
             return true
@@ -227,8 +248,14 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
             ?? FeatureStrings.scratchpad(L10n.shared.language).pageTitle
     }
 
+    /// A new tab is a new `.md` file, created in the vault before the tab
+    /// appears so the note exists the moment it can be typed in.
     func createPad(defaultName: String) {
-        guard let document, let next = document.addingPad(defaultName: defaultName), save(next) else { return }
+        guard let document, let next = store.createNote(named: defaultName, in: document) else {
+            saveFailed = true
+            return
+        }
+        saveFailed = false
         apply(next, focus: true)
     }
 
@@ -237,14 +264,28 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         apply(next, focus: true)
     }
 
+    /// Renaming a tab renames its file in the vault; a taken name leaves both
+    /// the note and its tab as they were and says why.
     func renamePad(_ id: UUID, to name: String) {
-        guard let document, let next = document.renaming(id, to: name), save(next) else { return }
+        guard let document else { return }
+        guard let next = store.renameNote(id, to: name, in: document) else {
+            if !ScratchpadSupport.sanitizedPadName(name).isEmpty {
+                QuickToolHUD.show(
+                    icon: "exclamationmark.triangle",
+                    message: FeatureStrings.scratchpad(L10n.shared.language).renameNoteFailed)
+            }
+            return
+        }
         apply(next, focus: id == selectedPadID)
     }
 
+    /// Closing a tab only stops showing the note; the file stays in the vault.
+    /// The last edits are flushed first so the closed tab cannot take the text
+    /// typed during the save debounce with it.
     @discardableResult
     func closePad(_ id: UUID) -> Bool {
-        guard let document, let next = document.removing(id), save(next) else { return false }
+        flushSave()
+        guard let document, let next = store.closeNote(id, in: document) else { return false }
         apply(next, focus: true)
         return true
     }
@@ -253,20 +294,185 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         modalInteractionActive = active
     }
 
-    /// Settings export asks for a current document only when the user invokes
-    /// it; normal app launch still performs no scratchpad content read.
+    /// Notes live in the vault, not in a settings backup, so export only has
+    /// to make sure a pending edit already reached its file.
     func prepareForSettingsBackup() {
-        if hasLoaded { flushSave() } else { loadApplyingRetention() }
+        if hasLoaded { flushSave() }
     }
 
-    /// Import intentionally replaces settings. Drop the in-memory document so
-    /// the termination flush cannot overwrite the restored backup on the way out.
+    /// Import intentionally replaces settings. Drop the in-memory tabs so the
+    /// termination flush cannot write them over the restored preferences.
     func prepareForSettingsRestore() {
         pendingSave?.cancel()
         pendingSave = nil
         hasLoaded = false
         document = nil
-        store = ScratchpadStore(directoryURL: PrivateFileStore.containerURL, defaults: .standard)
+        store = ScratchpadStore(vaultURL: vaultURL, defaults: .standard)
+    }
+
+    // MARK: - Vault
+
+    /// Picks the Obsidian vault the notes live in, then imports the private
+    /// notes this feature kept before it wrote Markdown.
+    func chooseVault() {
+        guard AppFeature.scratchpad.isAvailable, !modalInteractionActive else { return }
+        let strings = FeatureStrings.scratchpad(L10n.shared.language)
+        commitEdits()
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = strings.chooseVault
+        panel.message = strings.vaultCaption
+        panel.directoryURL = vaultURL
+        modalInteractionActive = true
+        let complete: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self else { return }
+            self.modalInteractionActive = false
+            guard response == .OK, let url = panel.url else { return }
+            self.adoptVault(url)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin(completionHandler: complete)
+    }
+
+    private func adoptVault(_ url: URL) {
+        let standardized = url.standardizedFileURL
+        let defaults = UserDefaults.standard
+        if let bookmark = ScratchpadVaultSupport.bookmark(for: standardized) {
+            defaults.set(bookmark, forKey: DefaultsKey.scratchpadVaultBookmark)
+        } else {
+            defaults.removeObject(forKey: DefaultsKey.scratchpadVaultBookmark)
+        }
+        defaults.set(standardized.path, forKey: DefaultsKey.scratchpadVaultPath)
+        hasLoaded = false
+        document = nil
+        refreshVault()
+        let strings = FeatureStrings.scratchpad(L10n.shared.language)
+        let imported = store.importLegacyNotes(defaultName: strings.pageTitle)
+        if imported > 0 {
+            QuickToolHUD.show(icon: "checkmark.circle",
+                              message: String(format: strings.importedNotesFormat, imported))
+        }
+        if isVisible, !load() { hide() }
+    }
+
+    private func refreshVault() {
+        let resolved = ScratchpadVaultSupport.resolvedVaultURL(defaults: .standard)
+        guard resolved?.standardizedFileURL.path != vaultURL?.standardizedFileURL.path else {
+            vaultPath = resolved?.path
+            return
+        }
+        scopedVaultURL?.stopAccessingSecurityScopedResource()
+        scopedVaultURL = nil
+        vaultURL = resolved
+        vaultPath = resolved?.path
+        if let resolved, resolved.startAccessingSecurityScopedResource() {
+            scopedVaultURL = resolved
+        }
+        store = ScratchpadStore(vaultURL: resolved, defaults: .standard)
+        hasLoaded = false
+        document = nil
+        pads = []
+        selectedPadID = nil
+    }
+
+    /// Opens a note the vault already holds, so any Markdown file is readable
+    /// and editable in the pad rather than only the ones it created.
+    func openExistingNote() {
+        guard AppFeature.scratchpad.isAvailable, !modalInteractionActive else { return }
+        let strings = FeatureStrings.scratchpad(L10n.shared.language)
+        refreshVault()
+        guard let vaultURL else {
+            QuickToolHUD.show(icon: "folder.badge.questionmark", message: strings.vaultMissing)
+            return
+        }
+        if document == nil, !load() {
+            QuickToolHUD.show(icon: "exclamationmark.triangle", message: strings.loadFailed)
+            return
+        }
+        guard pads.count < ScratchpadDocument.maximumPadCount else {
+            QuickToolHUD.show(icon: "rectangle.stack",
+                              message: String(format: strings.padLimitFormat,
+                                              ScratchpadDocument.maximumPadCount))
+            return
+        }
+        let padPanel = panel
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        if let markdown = UTType(filenameExtension: ScratchpadVaultSupport.markdownExtension) {
+            panel.allowedContentTypes = [markdown]
+        }
+        panel.directoryURL = vaultURL
+        panel.prompt = strings.openNote
+        panel.message = strings.vaultCaption
+        // The pad floats above ordinary windows; its picker has to sit above
+        // the pad instead of behind it.
+        if let padPanel { panel.level = NSWindow.Level(rawValue: padPanel.level.rawValue + 1) }
+        modalInteractionActive = true
+        let complete: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self else { return }
+            self.modalInteractionActive = false
+            guard response == .OK, let url = panel.url else { return }
+            guard let current = self.document,
+                  let next = self.store.openNote(at: url, in: current) else {
+                QuickToolHUD.show(icon: "exclamationmark.triangle", message: strings.openNoteFailed)
+                return
+            }
+            self.saveFailed = false
+            self.panel?.makeKey()
+            self.apply(next, focus: true)
+        }
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin(completionHandler: complete)
+    }
+
+    /// A clicked `[[wikilink]]` opens its note as a tab, and one naming a
+    /// note the vault does not hold yet creates it, as Obsidian does.
+    func openLinkedNote(_ target: String) {
+        guard let vaultURL else { return }
+        if let url = ScratchpadVaultSupport.noteURL(forWikilink: target, in: vaultURL) {
+            openNote { store, current in store.openNote(at: url, in: current) }
+        } else {
+            let name = String(target.prefix(while: { $0 != "#" && $0 != "^" }))
+            guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return }
+            openNote { store, current in store.createNote(named: name, in: current) }
+        }
+    }
+
+    /// The vault's notes for the open-note menu. Read when the menu opens,
+    /// never while a view draws.
+    func vaultNoteTree() -> [ScratchpadVaultNode] {
+        refreshVault()
+        guard let vaultURL else { return [] }
+        return ScratchpadVaultSupport.noteTree(in: vaultURL)
+    }
+
+    /// Opens a note picked from the vault's list as a tab, or selects its tab
+    /// when it is already open.
+    func openVaultNote(_ path: String) {
+        guard let vaultURL,
+              let url = ScratchpadVaultSupport.fileURL(forRelativePath: path, in: vaultURL) else { return }
+        openNote { store, current in store.openNote(at: url, in: current) }
+    }
+
+    private func openNote(_ change: (inout ScratchpadStore, ScratchpadDocument) -> ScratchpadDocument?) {
+        guard AppFeature.scratchpad.isAvailable, !modalInteractionActive else { return }
+        let strings = FeatureStrings.scratchpad(L10n.shared.language)
+        flushSave()
+        guard let current = document else { return }
+        guard let next = change(&store, current) else {
+            let message = pads.count < ScratchpadDocument.maximumPadCount
+                ? strings.openNoteFailed
+                : String(format: strings.padLimitFormat, ScratchpadDocument.maximumPadCount)
+            QuickToolHUD.show(icon: "exclamationmark.triangle", message: message)
+            return
+        }
+        saveFailed = false
+        apply(next, focus: true)
     }
 
     // MARK: - Actions

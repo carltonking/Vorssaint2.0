@@ -951,6 +951,9 @@ def main():
           + declaration(scratchpad_view, "struct NotchScratchpadView:")
           + "".join(declaration(scratchpad_reading, prefix) for prefix in [
               "struct MarkdownPreview:", "final class TaskBoxAttachment:", "final class TaskPreviewTextView:"])
+          + "".join(declaration("Sources/Vorssaint/UI/Scratchpad/ScratchpadLiveEditor.swift", prefix) for prefix in [
+              "final class ScratchpadLiveStyler:", "final class ScratchpadLiveLayoutManager:",
+              "final class ScratchpadLiveTextView:"])
           + "}\n"
           + declaration("Sources/Vorssaint/UI/Notch/NotchCalendarView.swift", "extension NotchCalendarColor {")
           + declaration("Sources/Vorssaint/UI/PlainTextLineMover.swift", "enum PlainTextLineMover")

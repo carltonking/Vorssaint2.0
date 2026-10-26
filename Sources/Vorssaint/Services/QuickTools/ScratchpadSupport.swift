@@ -3,35 +3,6 @@
 
 import Foundation
 
-/// How long each scratchpad keeps text that nobody edits. The check runs only
-/// when the panel opens, against the stored edit dates, so the feature needs
-/// no timer at all.
-enum ScratchpadRetention: String, CaseIterable {
-    case never
-    case day
-    case week
-    case month
-
-    /// Seconds the text may sit unedited before it clears; nil keeps forever.
-    var maxIdleInterval: TimeInterval? {
-        switch self {
-        case .never: return nil
-        case .day: return 86_400
-        case .week: return 7 * 86_400
-        case .month: return 30 * 86_400
-        }
-    }
-
-    /// Corrupt or unknown stored values fall back to keeping the text.
-    static func sanitized(_ rawValue: String?) -> ScratchpadRetention {
-        guard let rawValue,
-              let retention = ScratchpadRetention(rawValue: rawValue) else {
-            return .never
-        }
-        return retention
-    }
-}
-
 struct ScratchpadMarkdownBlock: Equatable {
     enum Kind: Equatable {
         case paragraph
@@ -54,18 +25,23 @@ struct ScratchpadMarkdownBlock: Equatable {
     var quoteDepth = 0
 }
 
-struct ScratchpadPad: Codable, Equatable, Identifiable {
+struct ScratchpadPad: Equatable, Identifiable {
     let id: UUID
+    /// The file's own name, without its `.md` extension: the tab label and
+    /// what a rename edits.
     var name: String
     var text: String
     var modifiedAt: Date?
+    /// Path relative to the vault root, so the tab survives the vault moving.
+    var path: String = ""
 }
 
-/// The whole scratchpad state travels as one small document. Stable ids keep
-/// selection independent from names, while array order is the tab order.
-struct ScratchpadDocument: Codable, Equatable {
-    /// Keeps the tab strip and Settings backup deliberately small without
-    /// imposing a limit on the text inside any pad.
+/// The open notes, in tab order, with stable ids for selection independent of
+/// file names. The files themselves are the storage; this is only what is on
+/// screen.
+struct ScratchpadDocument: Equatable {
+    /// Keeps the tab strip deliberately small without imposing a limit on the
+    /// text inside any note.
     static let maximumPadCount = 12
     static let maximumNameLength = 40
 
@@ -84,41 +60,12 @@ struct ScratchpadDocument: Codable, Equatable {
         return ScratchpadDocument(pads: [pad], selectedID: pad.id)
     }
 
-    static func decoded(_ data: Data?, defaultName: String) -> ScratchpadDocument? {
-        guard let data,
-              let decoded = try? JSONDecoder().decode(ScratchpadDocument.self, from: data)
-        else { return nil }
-        return decoded.sanitized(defaultName: defaultName)
-    }
-
-    func encoded() -> Data? {
-        try? JSONEncoder().encode(self)
-    }
-
-    func sanitized(defaultName: String) -> ScratchpadDocument {
-        var seen = Set<UUID>()
-        var cleanPads: [ScratchpadPad] = []
-        for pad in pads.prefix(Self.maximumPadCount) where seen.insert(pad.id).inserted {
-            let fallback = ScratchpadSupport.nextPadName(defaultName: defaultName,
-                                                         existingNames: cleanPads.map(\.name))
-            let name = ScratchpadSupport.sanitizedPadName(pad.name)
-            cleanPads.append(ScratchpadPad(id: pad.id,
-                                           name: name.isEmpty ? fallback : name,
-                                           text: pad.text,
-                                           modifiedAt: pad.text.isEmpty ? nil : pad.modifiedAt))
-        }
-        guard !cleanPads.isEmpty else { return .initial(defaultName: defaultName) }
-        let selection = cleanPads.contains(where: { $0.id == selectedID })
-            ? selectedID : cleanPads[0].id
-        return ScratchpadDocument(pads: cleanPads, selectedID: selection)
-    }
-
-    func addingPad(defaultName: String, id: UUID = UUID()) -> ScratchpadDocument? {
+    func addingPad(defaultName: String, id: UUID = UUID(), path: String = "") -> ScratchpadDocument? {
         guard pads.count < Self.maximumPadCount else { return nil }
         var next = self
         let name = ScratchpadSupport.nextPadName(defaultName: defaultName,
                                                  existingNames: pads.map(\.name))
-        next.pads.append(ScratchpadPad(id: id, name: name, text: "", modifiedAt: nil))
+        next.pads.append(ScratchpadPad(id: id, name: name, text: "", modifiedAt: nil, path: path))
         next.selectedID = id
         return next
     }
@@ -153,15 +100,6 @@ struct ScratchpadDocument: Codable, Equatable {
               pads[index].text != text else { return }
         pads[index].text = text
         pads[index].modifiedAt = text.isEmpty ? nil : modifiedAt
-    }
-
-    mutating func applyRetention(_ retention: ScratchpadRetention, now: Date) {
-        for index in pads.indices where ScratchpadSupport.shouldClear(
-            lastEdited: pads[index].modifiedAt, now: now, retention: retention
-        ) {
-            pads[index].text = ""
-            pads[index].modifiedAt = nil
-        }
     }
 }
 
@@ -514,19 +452,6 @@ enum ScratchpadSupport {
             return "\(safeBase) \(number)"
         }
         return "\(safeBase) \(existingNames.count + 1)"
-    }
-
-    static func requiresCloseConfirmation(_ pad: ScratchpadPad) -> Bool {
-        !pad.text.isEmpty
-    }
-
-    /// Whether the saved text expired: it only clears when a retention period
-    /// is chosen and the last edit is older than that period. No saved text
-    /// (or a clock that moved backwards) never clears.
-    static func shouldClear(lastEdited: Date?, now: Date, retention: ScratchpadRetention) -> Bool {
-        guard let limit = retention.maxIdleInterval, let lastEdited else { return false }
-        let idle = now.timeIntervalSince(lastEdited)
-        return idle > limit
     }
 
     /// Suggested name for the exported file, like "Scratchpad 2026-07-17.txt".

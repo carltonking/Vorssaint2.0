@@ -825,9 +825,19 @@ MUTATIONS = [
      "        isAvailable && pointerOnDisplay && !selectionInProgress && !capturePending",
      "        isAvailable && !selectionInProgress && !capturePending",
      "the full-screen action stays on the pointer display and disappears as soon as selection or capture starts"),
-    ("overwrite unreadable notes", "storage", "Sources/Vorssaint/Services/QuickTools/ScratchpadStore.swift",
-     "        guard canSave else { return false }", "        // guard canSave else { return false }",
-     "damaged scratchpad blocks subsequent saves of empty and nonempty documents"),
+    ("overwrite notes Obsidian changed", "storage", "Sources/Vorssaint/Services/QuickTools/ScratchpadStore.swift",
+     """            if let onDisk,
+               let previous = lastSavedDocument?.pads.first(where: { $0.path == pad.path })?.text,
+               onDisk != previous,
+               onDisk != pad.text {
+                savedEveryNote = false
+                continue
+            }""",
+     """            if false {
+                savedEveryNote = false
+                continue
+            }""",
+     "an autosave never overwrites a note Obsidian changed meanwhile"),
     ("island forgets a preview stays until dismissed", "notch", "Sources/Vorssaint/Services/Notch/NotchService.swift",
      "        captureClosesOnCollapse = closeOnCollapse\n", "",
      "capture controls detach a persistent preview before closing it after island takeover"),

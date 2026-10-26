@@ -18,174 +18,216 @@ enum ScratchpadStoreContractTests {
         ScratchpadSaveContract.run(suite)
         let manager = FileManager.default
         let now = Date(timeIntervalSince1970: 1_784_000_000)
-        let original = ScratchpadDocument.initial(defaultName: "Scratchpad", text: "Keep these notes",
-                                                   modifiedAt: now.addingTimeInterval(-90_000))
-        let originalData = original.encoded()!
-        let empty = ScratchpadDocument.initial(defaultName: "Scratchpad")
 
         func fixture(_ check: (URL, UserDefaults, inout ScratchpadStore) throws -> Void) {
-            let directory = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            let root = manager.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            let vault = root.appendingPathComponent("Vault")
+            let container = root.appendingPathComponent("Container")
             let suiteName = "com.vorssaint.tests.scratchpad.\(UUID().uuidString)"
             let defaults = UserDefaults(suiteName: suiteName)!
             defer {
-                try? manager.removeItem(at: directory)
+                try? manager.removeItem(at: root)
                 defaults.removePersistentDomain(forName: suiteName)
             }
             do {
-                try manager.createDirectory(at: directory, withIntermediateDirectories: true)
-                var store = ScratchpadStore(directoryURL: directory, defaults: defaults)
-                try check(directory, defaults, &store)
+                try manager.createDirectory(at: vault, withIntermediateDirectories: true)
+                try manager.createDirectory(at: container, withIntermediateDirectories: true)
+                var store = ScratchpadStore(vaultURL: vault,
+                                            defaults: defaults,
+                                            privateContainerURL: container)
+                try check(vault, defaults, &store)
             } catch {
-                suite.expect(false, "scratchpad fixture completes: \(error)")
+                suite.expect(false, "scratchpad vault fixture completes: \(error)")
             }
         }
 
-        fixture { directory, _, store in
-            suite.expect(!store.save(empty), "scratchpad cannot save before its first successful read")
-            let loaded = try store.load(defaultName: "Scratchpad", retention: .never, now: now)
-            suite.expect(loaded.pads.count == 1 && loaded.pads[0].text.isEmpty,
-                   "a scratchpad with no files or preferences starts empty")
-            suite.expect(store.save(original), "a new scratchpad saves edits after a successful read")
-            let reopened = try store.load(defaultName: "Scratchpad", retention: .never, now: now)
-            suite.expect(reopened == original, "scratchpad edits survive reopening")
-            let url = directory.appendingPathComponent("Scratchpad.json")
-            let permissions = try manager.attributesOfItem(atPath: url.path)[.posixPermissions] as? NSNumber
-            suite.expect(permissions?.intValue == 0o600, "scratchpad content remains owner-only")
-        }
+        suite.expect(ScratchpadVaultSupport.sanitizedFileStem("  Work/Ideas: 1  ") == "Work-Ideas- 1"
+                && ScratchpadVaultSupport.sanitizedFileStem("...") == "Note"
+                && ScratchpadVaultSupport.sanitizedFileStem(String(repeating: "x", count: 60)).count
+                    == ScratchpadDocument.maximumNameLength,
+               "note file names stay one line, safe for the vault and bounded")
+        let pathVault = URL(fileURLWithPath: "/tmp/Vault", isDirectory: true)
+        suite.expect(ScratchpadVaultSupport.relativePath(
+                of: URL(fileURLWithPath: "/tmp/Vault/Notes/Today.md"), in: pathVault) == "Notes/Today.md"
+                && ScratchpadVaultSupport.relativePath(
+                    of: URL(fileURLWithPath: "/tmp/Vault/Notes/Today.txt"), in: pathVault) == nil
+                && ScratchpadVaultSupport.relativePath(
+                    of: URL(fileURLWithPath: "/tmp/Other/Today.md"), in: pathVault) == nil
+                && ScratchpadVaultSupport.fileURL(forRelativePath: "../Other.md", in: pathVault) == nil
+                && ScratchpadVaultSupport.fileURL(forRelativePath: "/etc/passwd.md", in: pathVault) == nil,
+               "only Markdown files inside the chosen vault can become notes")
 
-        for damaged in [Data(), Data("{broken".utf8), Data("{}".utf8)] {
-            fixture { directory, defaults, store in
-                let url = directory.appendingPathComponent("Scratchpad.json")
-                let legacyURL = directory.appendingPathComponent("Scratchpad.txt")
-                try damaged.write(to: url)
-                try Data("Older notes".utf8).write(to: legacyURL)
-                defaults.set(originalData, forKey: DefaultsKey.scratchpadDocument)
-                suite.expect((try? store.load(defaultName: "Scratchpad", retention: .day, now: now)) == nil,
-                       "damaged scratchpad data fails without applying retention or falling back")
-                suite.expect(!store.save(empty) && !store.save(original),
-                       "a damaged scratchpad blocks subsequent saves of empty and nonempty documents")
-                suite.expect(try Data(contentsOf: url) == damaged,
-                       "damaged scratchpad bytes are preserved exactly")
-                suite.expect(defaults.data(forKey: DefaultsKey.scratchpadDocument) == originalData
-                        && (try? String(contentsOf: legacyURL, encoding: .utf8)) == "Older notes",
-                       "a damaged current file keeps both older copies")
-                try originalData.write(to: url)
-                let retried = try store.load(defaultName: "Scratchpad", retention: .never, now: now)
-                suite.expect(retried == original && store.save(original),
-                       "retrying after the file becomes readable re-enables normal saving")
+        fixture { vault, _, store in
+            for path in ["b.md", "A note.md", "Projects/Plan.md", "Projects/Deep/Idea.md", "Empty/readme.txt",
+                         ".obsidian/workspace.md", "image.png", "10 Later.md", "2 Soon.md"] {
+                let url = vault.appendingPathComponent(path)
+                try manager.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try "x".write(to: url, atomically: true, encoding: .utf8)
             }
+            let tree = ScratchpadVaultSupport.noteTree(in: vault)
+            suite.expect(tree.map(\.name) == ["Projects", "2 Soon", "10 Later", "A note", "b"],
+                   "the note list puts folders first, sorts as Finder does, and skips hidden, empty and non-Markdown entries")
+            suite.expect(tree.first?.children?.map(\.name) == ["Deep", "Plan"]
+                    && tree.first?.children?.first?.children?.map(\.path) == ["Projects/Deep/Idea.md"],
+                   "folders nest with each note's path relative to the vault")
+            _ = try store.load(defaultName: "Scratchpad", now: now)
+            let listed = tree.first { $0.name == "A note" }!
+            let opened = ScratchpadVaultSupport.fileURL(forRelativePath: listed.path, in: vault)
+                .flatMap { store.openNote(at: $0, in: store.lastSavedDocument!) }
+            suite.expect(opened?.pads.last?.path == "A note.md" && opened?.selectedID == opened?.pads.last?.id,
+                   "a note picked from the list opens as the selected tab")
         }
 
-        fixture { directory, defaults, store in
-            let url = directory.appendingPathComponent("Scratchpad.json")
-            try originalData.write(to: url)
-            _ = try store.load(defaultName: "Scratchpad", retention: .never, now: now)
-            defaults.set(originalData, forKey: DefaultsKey.scratchpadDocument)
-            try manager.setAttributes([.posixPermissions: 0], ofItemAtPath: url.path)
-            defer { try? manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path) }
-            suite.expect((try? store.load(defaultName: "Scratchpad", retention: .day, now: now)) == nil,
-                   "a read permission failure after a successful opening is not treated as a missing file")
-            suite.expect(!store.save(empty) && !store.save(original),
-                   "a failed reload revokes saving even for the previously saved document")
-            try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
-            suite.expect(try Data(contentsOf: url) == originalData,
-                   "a read permission failure preserves the original file")
-            suite.expect(defaults.data(forKey: DefaultsKey.scratchpadDocument) == originalData,
-                   "a read permission failure preserves a valid preference copy")
+        fixture { vault, defaults, _ in
+            defaults.set(vault.path, forKey: DefaultsKey.scratchpadVaultPath)
+            suite.expect(ScratchpadVaultSupport.resolvedVaultURL(defaults: defaults)?.path == vault.path,
+                   "the chosen vault is found again from its stored path")
+            defaults.removeObject(forKey: DefaultsKey.scratchpadVaultPath)
+            suite.expect(ScratchpadVaultSupport.resolvedVaultURL(defaults: defaults) == nil,
+                   "without a vault or bookmark there is nowhere to keep notes")
         }
 
-        for preference: Any in [Data("{broken".utf8), "unexpected preference type"] {
-            fixture { directory, defaults, store in
-                defaults.set(preference, forKey: DefaultsKey.scratchpadDocument)
-                let legacyURL = directory.appendingPathComponent("Scratchpad.txt")
-                try Data("Older notes".utf8).write(to: legacyURL)
-                suite.expect((try? store.load(defaultName: "Scratchpad", retention: .never, now: now)) == nil
-                        && !store.save(empty), "an invalid preference blocks replacement and legacy migration")
-                suite.expect(defaults.object(forKey: DefaultsKey.scratchpadDocument) != nil
-                        && !manager.fileExists(atPath: directory.appendingPathComponent("Scratchpad.json").path)
-                        && (try? String(contentsOf: legacyURL, encoding: .utf8)) == "Older notes",
-                       "invalid preferences and older notes survive a failed load")
+        fixture { vault, _, store in
+            suite.expect(!store.save(ScratchpadDocument.initial(defaultName: "Scratchpad")),
+                   "a note cannot be saved before the vault has been read")
+            let loaded = try store.load(defaultName: "Scratchpad", now: now)
+            let firstURL = vault.appendingPathComponent("Scratchpad.md")
+            suite.expect(loaded.pads.count == 1
+                    && loaded.pads[0].name == "Scratchpad"
+                    && loaded.pads[0].path == "Scratchpad.md"
+                    && manager.fileExists(atPath: firstURL.path),
+                   "a vault with no open notes starts with a new Markdown file")
+            var edited = loaded
+            edited.updateSelectedText("# First note", modifiedAt: now)
+            suite.expect(store.save(edited)
+                    && (try? String(contentsOf: firstURL, encoding: .utf8)) == "# First note",
+                   "typing writes the note straight into its Markdown file")
+            let reopened = try store.load(defaultName: "Scratchpad", now: now)
+            suite.expect(reopened.pads.map(\.text) == ["# First note"],
+                   "the open note comes back from the file")
+        }
+
+        fixture { vault, _, store in
+            let loaded = try store.load(defaultName: "Scratchpad", now: now)
+            guard let withSecond = store.createNote(named: "Ideas", in: loaded) else {
+                suite.expect(false, "a new note is created")
+                return
             }
-        }
-
-        fixture { directory, defaults, store in
-            defaults.set(originalData, forKey: DefaultsKey.scratchpadDocument)
-            let migrated = try store.load(defaultName: "Scratchpad", retention: .never, now: now)
-            let saved = try Data(contentsOf: directory.appendingPathComponent("Scratchpad.json"))
-            suite.expect(migrated == original && ScratchpadDocument.decoded(saved, defaultName: "Scratchpad") == original,
-                   "valid preferences migrate with all note content intact")
-            suite.expect(defaults.object(forKey: DefaultsKey.scratchpadDocument) == nil,
-                   "a migrated preference is removed after the replacement is verified")
-        }
-
-        for legacy in [false, true] {
-            fixture { directory, defaults, store in
-                let legacyURL = directory.appendingPathComponent("Scratchpad.txt")
-                if legacy {
-                    try Data("Older notes".utf8).write(to: legacyURL)
-                } else {
-                    defaults.set(originalData, forKey: DefaultsKey.scratchpadDocument)
-                }
-                try manager.setAttributes([.immutable: true], ofItemAtPath: directory.path)
-                defer { try? manager.setAttributes([.immutable: false], ofItemAtPath: directory.path) }
-                let loaded = try store.load(defaultName: "Scratchpad", retention: .never, now: now)
-                suite.expect(store.lastSavedDocument == nil
-                        && !manager.fileExists(atPath: directory.appendingPathComponent("Scratchpad.json").path),
-                       "a blocked migration never counts as a saved document")
-                suite.expect(legacy
-                        ? (try? String(contentsOf: legacyURL, encoding: .utf8)) == "Older notes"
-                        : defaults.data(forKey: DefaultsKey.scratchpadDocument) == originalData,
-                       "a failed migration write keeps the source copy")
-                try manager.setAttributes([.immutable: false], ofItemAtPath: directory.path)
-                suite.expect(store.save(loaded), "migration can retry saving once storage becomes writable")
+            let secondURL = vault.appendingPathComponent("Ideas.md")
+            suite.expect(withSecond.pads.map(\.name) == ["Scratchpad", "Ideas"]
+                    && withSecond.selectedID == withSecond.pads[1].id
+                    && manager.fileExists(atPath: secondURL.path),
+                   "a new tab is a new note file in the vault")
+            var edited = withSecond
+            edited.pads[1].text = "Second"
+            suite.expect(store.save(edited), "the second note's text reaches its file")
+            guard let renamed = store.renameNote(edited.pads[1].id, to: "Plans", in: edited) else {
+                suite.expect(false, "a note is renamed")
+                return
             }
-        }
-
-        for unreadable in [false, true] {
-            fixture { directory, _, store in
-                let legacyURL = directory.appendingPathComponent("Scratchpad.txt")
-                let legacyData = unreadable ? Data("Keep these notes".utf8) : Data([0xff, 0xfe, 0xff])
-                try legacyData.write(to: legacyURL)
-                if unreadable { try manager.setAttributes([.posixPermissions: 0], ofItemAtPath: legacyURL.path) }
-                defer { try? manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: legacyURL.path) }
-                suite.expect((try? store.load(defaultName: "Scratchpad", retention: .day, now: now)) == nil
-                        && !store.save(empty), "unreadable or invalid legacy text blocks saving")
-                try manager.setAttributes([.posixPermissions: 0o600], ofItemAtPath: legacyURL.path)
-                suite.expect(try Data(contentsOf: legacyURL) == legacyData,
-                       "failed legacy reads preserve the exact original bytes")
-                suite.expect(!manager.fileExists(atPath: directory.appendingPathComponent("Scratchpad.json").path),
-                       "failed legacy reads never create an empty replacement")
+            let renamedURL = vault.appendingPathComponent("Plans.md")
+            suite.expect(renamed.pads[1].name == "Plans"
+                    && renamed.pads[1].path == "Plans.md"
+                    && !manager.fileExists(atPath: secondURL.path)
+                    && (try? String(contentsOf: renamedURL, encoding: .utf8)) == "Second",
+                   "renaming a tab renames its file and keeps the text")
+            suite.expect(store.renameNote(renamed.pads[1].id, to: "Scratchpad", in: renamed) == nil
+                    && manager.fileExists(atPath: renamedURL.path),
+                   "a name already in the vault cannot be taken")
+            guard let closed = store.closeNote(renamed.pads[1].id, in: renamed) else {
+                suite.expect(false, "a note is closed")
+                return
             }
+            suite.expect(closed.pads.count == 1
+                    && manager.fileExists(atPath: renamedURL.path),
+                   "closing a tab leaves the note file in the vault")
+            suite.expect(store.closeNote(closed.pads[0].id, in: closed) == nil,
+                   "the last open note cannot be closed")
         }
 
-        fixture { directory, _, store in
-            let legacyURL = directory.appendingPathComponent("Scratchpad.txt")
-            try Data("Older notes".utf8).write(to: legacyURL)
-            let migrated = try store.load(defaultName: "Scratchpad", retention: .never, now: now)
-            let saved = try Data(contentsOf: directory.appendingPathComponent("Scratchpad.json"))
-            suite.expect(migrated.pads[0].text == "Older notes"
-                    && ScratchpadDocument.decoded(saved, defaultName: "Scratchpad") == migrated
-                    && !manager.fileExists(atPath: legacyURL.path),
-                   "valid legacy text is removed only after its replacement is verified")
+        fixture { vault, _, store in
+            let notes = vault.appendingPathComponent("Notes")
+            try manager.createDirectory(at: notes, withIntermediateDirectories: true)
+            let noteURL = notes.appendingPathComponent("Existing.md")
+            try "# Existing".write(to: noteURL, atomically: true, encoding: .utf8)
+            try "ignore".write(to: notes.appendingPathComponent("Scan.txt"),
+                               atomically: true, encoding: .utf8)
+            let loaded = try store.load(defaultName: "Scratchpad", now: now)
+            guard let opened = store.openNote(at: noteURL, in: loaded) else {
+                suite.expect(false, "an existing vault note opens")
+                return
+            }
+            suite.expect(opened.pads.contains { $0.path == "Notes/Existing.md"
+                    && $0.name == "Existing" && $0.text == "# Existing" },
+                   "any Markdown file in the vault can be read in the pad")
+            suite.expect(store.openNote(at: notes.appendingPathComponent("Scan.txt"),
+                                        in: opened) == nil,
+                   "a text file that is not Markdown cannot be opened")
+            let outside = manager.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).md")
+            try "outside".write(to: outside, atomically: true, encoding: .utf8)
+            defer { try? manager.removeItem(at: outside) }
+            suite.expect(store.openNote(at: outside, in: opened) == nil,
+                   "a Markdown file outside the chosen vault cannot be opened")
+            let reopened = try store.load(defaultName: "Scratchpad", now: now)
+            suite.expect(reopened.pads.map(\.path) == opened.pads.map(\.path),
+                   "the open notes and their order come back after reopening")
         }
 
-        fixture { directory, _, store in
-            let url = directory.appendingPathComponent("Scratchpad.json")
-            try originalData.write(to: url)
-            let loaded = try store.load(defaultName: "Scratchpad", retention: .day, now: now)
-            let saved = try Data(contentsOf: url)
-            suite.expect(loaded.pads[0].text.isEmpty
-                    && ScratchpadDocument.decoded(saved, defaultName: "Scratchpad") == loaded,
-                   "retention still clears expired notes after a successful read")
+        fixture { vault, _, store in
+            let loaded = try store.load(defaultName: "Scratchpad", now: now)
+            let url = vault.appendingPathComponent(loaded.pads[0].path)
+            try "From Obsidian".write(to: url, atomically: true, encoding: .utf8)
+            var edited = loaded
+            edited.updateSelectedText("Typed here", modifiedAt: now)
+            suite.expect(!store.save(edited)
+                    && (try? String(contentsOf: url, encoding: .utf8)) == "From Obsidian",
+                   "an autosave never overwrites a note Obsidian changed meanwhile")
+            let reloaded = try store.load(defaultName: "Scratchpad", now: now)
+            suite.expect(reloaded.pads[0].text == "From Obsidian",
+                   "reopening the pad shows the text Obsidian wrote")
+        }
+
+        fixture { vault, defaults, store in
+            let legacyID = UUID(uuidString: "00000000-0000-0000-0000-0000000000AA")!
+            let legacy = """
+            {"pads":[{"id":"\(legacyID.uuidString)","name":"Old note","text":"Remember this"}],"selectedID":"\(legacyID.uuidString)"}
+            """
+            defaults.set(Data(legacy.utf8), forKey: DefaultsKey.scratchpadDocument)
+            suite.expect(store.importLegacyNotes(defaultName: "Scratchpad") == 1
+                    && (try? String(contentsOf: vault.appendingPathComponent("Old note.md"),
+                                    encoding: .utf8)) == "Remember this"
+                    && defaults.stringArray(forKey: DefaultsKey.scratchpadOpenNotes) == ["Old note.md"]
+                    && defaults.bool(forKey: DefaultsKey.scratchpadLegacyImported),
+                   "the old private notes are imported once as Markdown files")
+            suite.expect(defaults.data(forKey: DefaultsKey.scratchpadDocument) == Data(legacy.utf8),
+                   "leftover private notes stay untouched as a fallback")
+            suite.expect(store.importLegacyNotes(defaultName: "Scratchpad") == 0,
+                   "the same private notes are not imported twice")
+        }
+
+        fixture { vault, _, store in
+            let legacyID = UUID(uuidString: "00000000-0000-0000-0000-0000000000BB")!
+            let legacy = """
+            {"pads":[{"id":"\(legacyID.uuidString)","name":"Private pad","text":"From the container"}],"selectedID":"\(legacyID.uuidString)"}
+            """
+            guard let container = store.privateContainerURL else {
+                suite.expect(false, "the private container is available to import")
+                return
+            }
+            try Data(legacy.utf8).write(to: container.appendingPathComponent("Scratchpad.json"))
+            suite.expect(store.importLegacyNotes(defaultName: "Scratchpad") == 1
+                    && (try? String(contentsOf: vault.appendingPathComponent("Private pad.md"),
+                                    encoding: .utf8)) == "From the container"
+                    && manager.fileExists(atPath: container.appendingPathComponent("Scratchpad.json").path),
+                   "notes kept in the private container are imported and their original is kept")
         }
 
         fixture { _, defaults, _ in
-            defaults.set(originalData, forKey: DefaultsKey.scratchpadDocument)
-            var unavailable = ScratchpadStore(directoryURL: nil, defaults: defaults)
-            suite.expect((try? unavailable.load(defaultName: "Scratchpad", retention: .never, now: now)) == nil
-                    && !unavailable.save(empty)
-                    && defaults.data(forKey: DefaultsKey.scratchpadDocument) == originalData,
-                   "an unavailable private container never discards stored notes")
+            var unavailable = ScratchpadStore(vaultURL: nil, defaults: defaults)
+            suite.expect((try? unavailable.load(defaultName: "Scratchpad", now: now)) == nil
+                    && !unavailable.save(ScratchpadDocument.initial(defaultName: "Scratchpad"))
+                    && defaults.stringArray(forKey: DefaultsKey.scratchpadOpenNotes) == nil,
+                   "no vault means no note is read or written")
         }
     }
 }
@@ -390,10 +432,19 @@ enum ScratchpadExportContract {
 enum ScratchpadSaveContract {
     final class Store {
         var succeeds = false
+        var creates = false
         var writes = 0
+        var createsRequested = 0
+        var notesCreated = 0
         func save(_ document: ScratchpadDocument) -> Bool {
             writes += 1
             return succeeds
+        }
+        func createNote(named: String, in document: ScratchpadDocument) -> ScratchpadDocument? {
+            createsRequested += 1
+            guard creates else { return nil }
+            notesCreated += 1
+            return document.addingPad(defaultName: named, path: "note-\(notesCreated).md")
         }
     }
     enum HUD {
@@ -421,15 +472,17 @@ enum ScratchpadSaveContract {
         service.flushSave()
         suite.expect(service.saveFailed, "a failed autosave marks the pad as unsaved")
         service.createPad(defaultName: "Notes")
-        suite.expect(service.saveFailed && service.store.writes == 2 && HUD.messages.isEmpty,
-                     "a failed tab write keeps the warning in place and every write is still tried")
+        suite.expect(service.saveFailed && service.store.createsRequested == 1 && service.store.writes == 1,
+                     "a failed new note keeps the warning in place")
         suite.expect(service.applied == 0 && service.document?.pads.count == 1,
-                     "a tab action whose write failed leaves the notes as they were")
+                     "a tab action whose file could not be created leaves the notes as they were")
         service.commitEdits()
         suite.expect(HUD.messages == [message], "a failed write as the pad or the island closes shows the HUD")
+        service.store.creates = true
         service.store.succeeds = true
         service.createPad(defaultName: "Notes")
-        suite.expect(!service.saveFailed && service.applied == 1, "a successful write clears the warning")
+        suite.expect(!service.saveFailed && service.applied == 1 && service.document?.pads.count == 2,
+                     "a created note clears the warning and opens its tab")
         service.commitEdits()
         suite.expect(HUD.messages.count == 1, "a successful write on close shows no HUD")
     }

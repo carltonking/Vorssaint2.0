@@ -17,7 +17,6 @@ struct QuickToolsSettings: View {
     @AppStorage(DefaultsKey.micMuteShortcutEnabled) private var micShortcutEnabled = false
     @AppStorage(DefaultsKey.cameraPreviewShortcutEnabled) private var cameraShortcutEnabled = false
     @AppStorage(DefaultsKey.scratchpadShortcutEnabled) private var scratchpadShortcutEnabled = false
-    @AppStorage(DefaultsKey.scratchpadRetention) private var scratchpadRetention = ScratchpadRetention.never.rawValue
     @AppStorage(DefaultsKey.scratchpadCloseOnClickOutside) private var scratchpadCloseOnClickOutside = true
     @AppStorage(DefaultsKey.scratchpadBackgroundOpacity) private var scratchpadBackgroundOpacity = 0.0
     @AppStorage(DefaultsKey.scratchpadTextSize) private var scratchpadTextSize = ScratchpadSupport.defaultTextSize
@@ -202,20 +201,20 @@ struct QuickToolsSettings: View {
                     Text(FeatureStrings.scratchpad(l10n.language).panelCaption)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    Picker(FeatureStrings.scratchpad(l10n.language).retentionTitle,
-                           selection: $scratchpadRetention) {
-                        Text(FeatureStrings.scratchpad(l10n.language).retentionNever)
-                            .tag(ScratchpadRetention.never.rawValue)
-                        Text(FeatureStrings.scratchpad(l10n.language).retentionDay)
-                            .tag(ScratchpadRetention.day.rawValue)
-                        Text(FeatureStrings.scratchpad(l10n.language).retentionWeek)
-                            .tag(ScratchpadRetention.week.rawValue)
-                        Text(FeatureStrings.scratchpad(l10n.language).retentionMonth)
-                            .tag(ScratchpadRetention.month.rawValue)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(FeatureStrings.scratchpad(l10n.language).vaultTitle)
+                        Text(scratchpad.vaultPath ?? FeatureStrings.scratchpad(l10n.language).noVault)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Button(FeatureStrings.scratchpad(l10n.language).chooseVault) {
+                            ScratchpadService.shared.chooseVault()
+                        }
+                        Text(FeatureStrings.scratchpad(l10n.language).vaultCaption)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
                     }
-                    Text(FeatureStrings.scratchpad(l10n.language).retentionCaption)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                     Toggle(FeatureStrings.scratchpad(l10n.language).closeOnClickOutside,
                            isOn: $scratchpadCloseOnClickOutside)
                         .onChange(of: scratchpadCloseOnClickOutside) { _, _ in

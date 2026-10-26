@@ -623,11 +623,18 @@ enum DefaultsKey {
     static let commandBarFileScopes = "commandBarFileScopes"
     static let commandBarFileIgnores = "commandBarFileIgnores" // names a file search never shows
     static let panelUtilityCommandBar = "panelUtilityCommandBar"
-    static let scratchpadRetention = "scratchpadRetention"   // never | day | week | month
     static let scratchpadCloseOnClickOutside = "scratchpadCloseOnClickOutside"
     static let scratchpadBackgroundOpacity = "scratchpadBackgroundOpacity" // opaque fill over the pad material (ScratchpadSupport.backgroundOpacityRange)
-    static let scratchpadDocument = "scratchpadDocument"     // Data: ScratchpadDocument JSON, including named tabs
     static let scratchpadTextSize = "scratchpadTextSize"     // pad-wide point size (ScratchpadSupport.textSizeRange)
+    // The notes are .md files in the user's Obsidian vault. The vault and the
+    // open tabs belong to this Mac and this moment, so none of these keys are
+    // registered or carried by a settings backup.
+    static let scratchpadVaultPath = "scratchpadVaultPath"        // the folder the user picked
+    static let scratchpadVaultBookmark = "scratchpadVaultBookmark" // Data: security-scoped bookmark
+    static let scratchpadOpenNotes = "scratchpadOpenNotes"        // [String]: vault-relative open notes
+    static let scratchpadSelectedNote = "scratchpadSelectedNote"  // vault-relative selected note
+    static let scratchpadLegacyImported = "scratchpadLegacyImported"
+    static let scratchpadDocument = "scratchpadDocument"          // legacy private JSON, imported once
     static let micMuteActive = "micMuteActive"               // mic muted by the app (survives relaunch)
     static let micMuteSavedVolume = "micMuteSavedVolume"     // input volume to restore on unmute (pre 3.2.0 state)
     static let micMuteSavedVolumes = "micMuteSavedVolumes"   // [device uid: input volume] to restore on unmute
@@ -1825,7 +1832,6 @@ enum Defaults {
         DefaultsKey.commandBarPositionOffset: "",
         DefaultsKey.commandBarEmojiSkinTone: "",
         DefaultsKey.panelUtilityCommandBar: true,
-        DefaultsKey.scratchpadRetention: ScratchpadRetention.never.rawValue,
         DefaultsKey.scratchpadCloseOnClickOutside: true,
         DefaultsKey.scratchpadBackgroundOpacity: 0.0,
         DefaultsKey.scratchpadTextSize: ScratchpadSupport.defaultTextSize,

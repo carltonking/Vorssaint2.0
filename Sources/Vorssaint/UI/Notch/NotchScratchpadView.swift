@@ -36,7 +36,9 @@ struct NotchScratchpadView: View {
 
     var body: some View {
         Group {
-            if loadFailed {
+            if loadFailed, pad.vaultPath == nil {
+                NotchEmptyView(symbol: "folder.badge.questionmark", message: text.vaultMissing)
+            } else if loadFailed {
                 NotchEmptyView(symbol: "exclamationmark.triangle", message: text.loadFailed)
             } else {
                 VStack(spacing: 6) {
@@ -58,7 +60,10 @@ struct NotchScratchpadView: View {
                                         completesTaskBoxes: true,
                                         continuesLists: true,
                                         onCommandReturn: { pad.togglePreview() },
-                                        isActive: !pad.isPreviewing) { view in
+                                        isActive: !pad.isPreviewing,
+                                        livePreview: true,
+                                        onToggleTask: { pad.toggleTask(box: $0, through: editor.view) },
+                                        onOpenWikilink: { pad.openLinkedNote($0) }) { view in
                             view.insertionPointColor = .white
                             editor.view = view
                             DispatchQueue.main.async { focusEditor() }
@@ -93,6 +98,9 @@ struct NotchScratchpadView: View {
             if !loadFailed { noteActions }
         })
         .onAppear { loadFailed = !pad.loadForEmbedding() }
+        // A vault chosen in Settings while this page is up loads its notes
+        // here, rather than leaving the page on the error until it reopens.
+        .onChange(of: pad.vaultPath) { _, _ in loadFailed = !pad.loadForEmbedding() }
         .onDisappear { pad.commitEdits() }
         .onChange(of: pad.selectedPadID) { _, _ in
             DispatchQueue.main.async { focusEditor() }
@@ -161,7 +169,8 @@ struct NotchScratchpadView: View {
     /// tabs, with the way to a new pad after them.
     @ViewBuilder private var padControls: some View {
         if band.besideCamera {
-            NotchMenuButton(title: text.padActions, items: padItems(listsPads: true), cornerRadius: 9) {
+            NotchMenuButton(title: text.padActions, items: [], cornerRadius: 9,
+                            makeItems: { padItems(listsPads: true) }) {
                 NotchBandMenuLabel(title: pad.selectedPadName)
             }
             .help(text.padActions)
@@ -169,6 +178,14 @@ struct NotchScratchpadView: View {
         } else {
             HStack(spacing: 6) {
                 tabStrip
+                NotchMenuButton(title: text.openNote, items: [], cornerRadius: 9, makeItems: vaultItems) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.55))
+                        .frame(width: 28, height: 28)
+                        .contentShape(RoundedRectangle(cornerRadius: 9, style: .continuous))
+                }
+                .help(text.openNote)
                 NotchIconButton(symbol: "plus", title: newPadTitle) {
                     pad.createPad(defaultName: text.pageTitle)
                 }
@@ -214,6 +231,7 @@ struct NotchScratchpadView: View {
         }
         items += [
             NotchMenuItem(title: newPadTitle, enabled: pad.canCreatePad) { pad.createPad(defaultName: text.pageTitle) },
+            NotchMenuItem(title: text.openNote, symbol: "folder", children: vaultItems()),
             NotchMenuItem(title: text.renamePad, enabled: current != nil) {
                 if let current { presentRename(current) }
             },
@@ -233,6 +251,22 @@ struct NotchScratchpadView: View {
         return items
     }
 
+    /// Every note in the vault, folders as submenus, as Obsidian's file list
+    /// lays them out. Built when a menu opens, since it reads the vault.
+    private func vaultItems() -> [NotchMenuItem] {
+        func items(_ nodes: [ScratchpadVaultNode]) -> [NotchMenuItem] {
+            nodes.map { node in
+                guard let children = node.children else {
+                    return NotchMenuItem(title: node.name, checked: pad.pads.contains { $0.path == node.path },
+                                         symbol: "doc.text") { pad.openVaultNote(node.path) }
+                }
+                return NotchMenuItem(title: node.name, symbol: "folder", children: items(children))
+            }
+        }
+        let notes = items(pad.vaultNoteTree())
+        return notes.isEmpty ? [NotchMenuItem(title: text.vaultMissing, enabled: false)] : notes
+    }
+
     /// The chosen tab opens the pad's menu, as the pad's name does beside the
     /// camera. Another tab shows its cross under the pointer, as in the
     /// floating pad, while the strip keeps two pads or more.
@@ -240,7 +274,8 @@ struct NotchScratchpadView: View {
         let selected = entry.id == pad.selectedPadID
         return Group {
             if selected {
-                NotchMenuButton(title: text.padActions, items: padItems(listsPads: false), cornerRadius: 11) {
+                NotchMenuButton(title: text.padActions, items: [], cornerRadius: 11,
+                                makeItems: { padItems(listsPads: false) }) {
                     tabLabel(entry, selected: true)
                 }
                 .accessibilityValue(entry.name)
@@ -254,7 +289,7 @@ struct NotchScratchpadView: View {
         }
         .contextMenu {
             Button(text.renamePad) { presentRename(entry) }
-            Button(text.closePad, role: .destructive) { requestClose(entry) }
+            Button(text.closePad) { requestClose(entry) }
                 .disabled(!pad.canClosePad)
         }
         .accessibilityAddTraits(selected ? .isSelected : [])
@@ -316,18 +351,10 @@ struct NotchScratchpadView: View {
         }
     }
 
-    /// An empty pad goes without asking, like in the floating pad.
+    /// Closing never deletes the note, so there is nothing to confirm, as in
+    /// the floating pad.
     private func requestClose(_ entry: ScratchpadPad) {
         guard pad.canClosePad else { return }
-        guard ScratchpadSupport.requiresCloseConfirmation(entry) else { _ = pad.closePad(entry.id); return }
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = text.closePad
-            alert.informativeText = String(format: text.deletePadMessageFormat, entry.name)
-            alert.addButton(withTitle: text.closePad).hasDestructiveAction = true
-            alert.addButton(withTitle: text.cancel)
-            guard NotchIslandAlert.run(alert, above: service.presentationWindow) == .alertFirstButtonReturn else { return }
-            _ = pad.closePad(entry.id)
-        }
+        _ = pad.closePad(entry.id)
     }
 }

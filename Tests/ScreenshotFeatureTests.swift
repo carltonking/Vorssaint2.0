@@ -3788,8 +3788,6 @@ enum ScreenshotFeatureTests {
                "the default scratchpad shortcut is control option command N")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.panelUtilityScratchpad] as? Bool == true,
                "the scratchpad panel row ships visible like its siblings")
-        suite.expect(Defaults.registeredDefaults[DefaultsKey.scratchpadRetention] as? String == "never",
-               "the scratchpad keeps text until cleared by default")
         suite.expect(Defaults.registeredDefaults[DefaultsKey.scratchpadCloseOnClickOutside] as? Bool == true,
                "a click outside puts the scratchpad away unless the user keeps it floating")
         suite.expect(SettingsBackupSupport.exportKeys().contains(DefaultsKey.scratchpadCloseOnClickOutside),
@@ -3814,17 +3812,6 @@ enum ScreenshotFeatureTests {
         // registered text view.
         suite.expect(scratchpadViewSource.contains("onToggleTask: { service.toggleTask(box: $0) }"),
                "the floating pad's checkboxes edit through the service, so a click is one undoable edit")
-        suite.expect(ScratchpadRetention.sanitized("day") == .day
-                && ScratchpadRetention.sanitized("week") == .week
-                && ScratchpadRetention.sanitized("month") == .month
-                && ScratchpadRetention.sanitized(nil) == .never
-                && ScratchpadRetention.sanitized("yesterday") == .never,
-               "scratchpad retention sanitizes to the allowed periods and falls back to never")
-        suite.expect(ScratchpadRetention.never.maxIdleInterval == nil
-                && ScratchpadRetention.day.maxIdleInterval == 86_400
-                && ScratchpadRetention.week.maxIdleInterval == 7 * 86_400
-                && ScratchpadRetention.month.maxIdleInterval == 30 * 86_400,
-               "scratchpad retention periods are a day, a week and thirty days")
         suite.expect(ScratchpadSupport.dismissesOnOutsideClick(isPinned: false, exportModalActive: false)
                 && !ScratchpadSupport.dismissesOnOutsideClick(isPinned: true, exportModalActive: false)
                 && !ScratchpadSupport.dismissesOnOutsideClick(isPinned: false, exportModalActive: true),
@@ -3866,20 +3853,6 @@ enum ScreenshotFeatureTests {
                 && ScratchpadSupport.sanitizedBackgroundOpacity(.infinity) == 1.0,
                "a high or broken scratchpad opacity falls back to fully opaque")
         let scratchpadNow = Date(timeIntervalSince1970: 1_784_000_000)
-        suite.expect(!ScratchpadSupport.shouldClear(lastEdited: nil, now: scratchpadNow, retention: .day)
-                && !ScratchpadSupport.shouldClear(lastEdited: scratchpadNow.addingTimeInterval(-90_000),
-                                                  now: scratchpadNow, retention: .never)
-                && !ScratchpadSupport.shouldClear(lastEdited: scratchpadNow.addingTimeInterval(-3_600),
-                                                  now: scratchpadNow, retention: .day)
-                && ScratchpadSupport.shouldClear(lastEdited: scratchpadNow.addingTimeInterval(-90_000),
-                                                 now: scratchpadNow, retention: .day)
-                && !ScratchpadSupport.shouldClear(lastEdited: scratchpadNow.addingTimeInterval(-90_000),
-                                                  now: scratchpadNow, retention: .week)
-                && ScratchpadSupport.shouldClear(lastEdited: scratchpadNow.addingTimeInterval(-8 * 86_400),
-                                                 now: scratchpadNow, retention: .week)
-                && !ScratchpadSupport.shouldClear(lastEdited: scratchpadNow.addingTimeInterval(60),
-                                                  now: scratchpadNow, retention: .day),
-               "the scratchpad only clears when a period is chosen and the last edit is older than it")
         let scratchpadExportName = ScratchpadSupport.exportFileName(title: "Scratchpad",
                                                                     date: scratchpadNow)
         suite.expect(scratchpadExportName.hasPrefix("Scratchpad 20")
@@ -3914,11 +3887,6 @@ enum ScreenshotFeatureTests {
                "closing the selected scratchpad keeps order and selects its nearest neighbor")
         suite.expect(migratedScratchpad.removing(firstPadID) == nil,
                "the last scratchpad cannot be closed")
-        suite.expect(ScratchpadSupport.requiresCloseConfirmation(migratedScratchpad.pads[0])
-                && !ScratchpadSupport.requiresCloseConfirmation(
-                    ScratchpadDocument.initial(defaultName: "Scratchpad").pads[0]),
-               "only closing a scratchpad with content needs destructive confirmation")
-
         suite.expect(ScratchpadFocusedShortcut.action(charactersIgnoringModifiers: "t",
                                                    commandOnly: true,
                                                    canCreatePad: true,
@@ -3974,30 +3942,18 @@ enum ScreenshotFeatureTests {
         suite.expect(limitedScratchpads.pads.count == ScratchpadDocument.maximumPadCount
                 && limitedScratchpads.addingPad(defaultName: "Scratchpad") == nil,
                "scratchpads keep a small fixed upper bound")
-        var retainedScratchpads = ScratchpadDocument.initial(
-            defaultName: "Scratchpad",
-            id: firstPadID,
-            text: "expired text",
-            modifiedAt: scratchpadNow.addingTimeInterval(-90_000))
-        retainedScratchpads = retainedScratchpads.addingPad(defaultName: "Scratchpad",
-                                                             id: secondPadID)!
-        retainedScratchpads.updateSelectedText("recent text",
-                                               modifiedAt: scratchpadNow.addingTimeInterval(-300))
-        retainedScratchpads.applyRetention(.day, now: scratchpadNow)
-        suite.expect(retainedScratchpads.pads[0].text.isEmpty
-                && retainedScratchpads.pads[1].text == "recent text",
-               "retention clears only scratchpads whose own text expired")
-        let scratchpadDocumentData = renamedPad?.encoded()
-        let decodedScratchpads = ScratchpadDocument.decoded(scratchpadDocumentData,
-                                                            defaultName: "Scratchpad")
-        suite.expect(decodedScratchpads == renamedPad,
-               "scratchpad text, names, order and selection round-trip together")
+        let scratchpadVaultKeys = [DefaultsKey.scratchpadVaultPath,
+                                   DefaultsKey.scratchpadVaultBookmark,
+                                   DefaultsKey.scratchpadOpenNotes,
+                                   DefaultsKey.scratchpadSelectedNote,
+                                   DefaultsKey.scratchpadDocument]
         let scratchpadBackup = SettingsBackupSupport.payload(appVersion: "test") { key in
-            key == DefaultsKey.scratchpadDocument ? scratchpadDocumentData : nil
+            scratchpadVaultKeys.contains(key) ? Data("private".utf8) : nil
         }
         let restoredScratchpadSettings = SettingsBackupSupport.sanitizedSettings(from: scratchpadBackup)
-        suite.expect(restoredScratchpadSettings?[DefaultsKey.scratchpadDocument] == nil,
-               "the scratchpad's own text stays out of a settings backup people copy around")
+        suite.expect(restoredScratchpadSettings != nil
+                && scratchpadVaultKeys.allSatisfy { restoredScratchpadSettings?[$0] == nil },
+               "the vault location, open notes and the old private text stay out of a settings backup")
         let safeScratchpadExportName = ScratchpadSupport.exportFileName(
             title: "Work/Ideas: 1", date: scratchpadNow)
         suite.expect(safeScratchpadExportName.hasPrefix("Work-Ideas- 1 ")

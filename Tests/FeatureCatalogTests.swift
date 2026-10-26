@@ -1766,8 +1766,8 @@ enum FeatureCatalogTests {
                    "feedback character format keeps its placeholder (\(language.rawValue))")
             suite.expect(FeatureStrings.radialMenu(language).mediaOpenAppFormat.contains("%@"),
                    "Now Playing keeps the app-name placeholder (\(language.rawValue))")
-            suite.expect(FeatureStrings.scratchpad(language).deletePadMessageFormat.contains("%@")
-                    && FeatureStrings.scratchpad(language).padLimitFormat.contains("%d"),
+            suite.expect(FeatureStrings.scratchpad(language).padLimitFormat.contains("%d")
+                    && FeatureStrings.scratchpad(language).importedNotesFormat.contains("%d"),
                    "scratchpad dialog formats keep their placeholders (\(language.rawValue))")
             suite.expect(FeatureStrings.recorder(language).countdownSecondsFormat.contains("%d"),
                    "recorder countdown format keeps its specifier (\(language.rawValue))")

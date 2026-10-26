@@ -65,6 +65,15 @@ struct PlainTextEditor: NSViewRepresentable {
     var isActive = true
     /// Handed the text view once, for callers that need to reach it later.
     var onCreate: ((NSTextView) -> Void)?
+    /// Draws the Markdown formatted as it is typed, as Obsidian's Live
+    /// Preview does, with the source showing only where the caret is. Return
+    /// then carries a list on and Tab nests it, as there; Shift-Return is the
+    /// plain line.
+    var livePreview = false
+    /// A drawn checkbox was clicked; called with the offset of its `[`.
+    var onToggleTask: ((Int) -> Void)?
+    /// A formatted `[[wikilink]]` was clicked; called with the note it names.
+    var onOpenWikilink: ((String) -> Void)?
 
     init(text: Binding<String>,
          fontSize: CGFloat = PlainTextEditor.defaultFontSize,
@@ -76,6 +85,9 @@ struct PlainTextEditor: NSViewRepresentable {
          continuesLists: Bool = false,
          onCommandReturn: (() -> Void)? = nil,
          isActive: Bool = true,
+         livePreview: Bool = false,
+         onToggleTask: ((Int) -> Void)? = nil,
+         onOpenWikilink: ((String) -> Void)? = nil,
          onCreate: ((NSTextView) -> Void)? = nil) {
         self._text = text
         self.fontSize = fontSize
@@ -87,17 +99,24 @@ struct PlainTextEditor: NSViewRepresentable {
         self.continuesLists = continuesLists
         self.onCommandReturn = onCommandReturn
         self.isActive = isActive
+        self.livePreview = livePreview
+        self.onToggleTask = onToggleTask
+        self.onOpenWikilink = onOpenWikilink
         self.onCreate = onCreate
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scroll = NSTextView.scrollableTextView()
+        let scroll = livePreview
+            ? ScratchpadLiveTextView.scrollable(fontSize: fontSize, textColor: textColor ?? .labelColor)
+            : NSTextView.scrollableTextView()
         scroll.drawsBackground = false
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
         guard let textView = scroll.documentView as? NSTextView else { return scroll }
         textView.drawsBackground = false
-        textView.font = .systemFont(ofSize: fontSize)
+        // The live editor's fonts and colours belong to its styler: one font
+        // set over the whole text would flatten every heading.
+        if !livePreview { textView.font = .systemFont(ofSize: fontSize) }
         textView.textContainer?.lineFragmentPadding = Self.lineFragmentPadding
         textView.allowsUndo = true
         textView.isRichText = false
@@ -114,7 +133,7 @@ struct PlainTextEditor: NSViewRepresentable {
             textView.usesFindBar = true
             textView.isIncrementalSearchingEnabled = true
         }
-        if let textColor {
+        if let textColor, !livePreview {
             textView.textColor = textColor
         }
         if let textContainerInset {
@@ -128,6 +147,11 @@ struct PlainTextEditor: NSViewRepresentable {
         context.coordinator.completesTaskBoxes = completesTaskBoxes
         context.coordinator.continuesLists = continuesLists
         context.coordinator.onCommandReturn = onCommandReturn
+        context.coordinator.livePreview = livePreview
+        if let live = textView as? ScratchpadLiveTextView {
+            live.onToggleTask = onToggleTask
+            live.onOpenWikilink = onOpenWikilink
+        }
         context.coordinator.installLineMoveMonitor(for: textView)
         onCreate?(textView)
         return scroll
@@ -141,12 +165,21 @@ struct PlainTextEditor: NSViewRepresentable {
         guard let textView = nsView.documentView as? NSTextView else { return }
         context.coordinator.continuesLists = continuesLists
         context.coordinator.onCommandReturn = onCommandReturn
+        if let live = textView as? ScratchpadLiveTextView {
+            live.onToggleTask = onToggleTask
+            live.onOpenWikilink = onOpenWikilink
+        }
         // Hidden, not disabled: it keeps its text and undo history, and can
         // still be cleared through, but a hidden view has no cursor rects.
         if nsView.isHidden == isActive { nsView.isHidden = !isActive }
         // Size is a preference and can change under a view that is already up,
         // so it is applied before the text guard below rather than after it.
-        if textView.font?.pointSize != fontSize {
+        if let styler = (textView as? ScratchpadLiveTextView)?.styler {
+            if styler.baseSize != fontSize {
+                styler.baseSize = fontSize
+                styler.restyleAll()
+            }
+        } else if textView.font?.pointSize != fontSize {
             textView.font = .systemFont(ofSize: fontSize)
         }
         guard textView.string != text, !textView.hasMarkedText() else { return }
@@ -172,6 +205,7 @@ struct PlainTextEditor: NSViewRepresentable {
         var completesTaskBoxes = false
         var continuesLists = false
         var onCommandReturn: (() -> Void)?
+        var livePreview = false
         private weak var textView: NSTextView?
         private var lineMoveMonitor: Any?
 
@@ -193,12 +227,24 @@ struct PlainTextEditor: NSViewRepresentable {
                    !textView.hasMarkedText(),
                    [kVK_Return, kVK_ANSI_KeypadEnter].contains(Int(event.keyCode)) {
                     let flags = event.modifierFlags.intersection([.command, .option, .shift, .control])
-                    if flags == .shift, self.continuesLists {
+                    // Live Preview writes as Obsidian does: Return carries
+                    // the list on and Shift-Return is the plain line.
+                    if flags == (self.livePreview ? [] : .shift), self.continuesLists {
                         self.continueList(in: textView)
                         return nil
                     }
                     if flags == .command, let onCommandReturn = self.onCommandReturn {
                         onCommandReturn()
+                        return nil
+                    }
+                }
+                if let self, self.livePreview, let textView = self.textView,
+                   event.window === textView.window,
+                   textView.window?.firstResponder === textView,
+                   !textView.hasMarkedText(),
+                   Int(event.keyCode) == kVK_Tab {
+                    let flags = event.modifierFlags.intersection([.command, .option, .shift, .control])
+                    if flags.isEmpty || flags == .shift, self.indentList(outdent: flags == .shift, in: textView) {
                         return nil
                     }
                 }
@@ -225,6 +271,21 @@ struct PlainTextEditor: NSViewRepresentable {
             textView.insertText(edit.replacement, replacementRange: edit.range)
             textView.setSelectedRange(NSRange(location: edit.caret, length: 0))
             textView.scrollRangeToVisible(textView.selectedRange())
+        }
+
+        /// Tab or Shift-Tab on list items: false when the lines are not list
+        /// items, so the key does what it does anywhere else.
+        private func indentList(outdent: Bool, in textView: NSTextView) -> Bool {
+            guard let edit = ScratchpadLiveMarkdown.listIndentEdit(in: textView.string,
+                                                                   selection: textView.selectedRange(),
+                                                                   outdent: outdent),
+                  textView.isEditable else { return false }
+            textView.breakUndoCoalescing()
+            guard textView.shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return false }
+            textView.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+            textView.didChangeText()
+            textView.setSelectedRange(edit.selection)
+            return true
         }
 
         func removeLineMoveMonitor() {

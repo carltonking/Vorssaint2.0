@@ -399,6 +399,7 @@ if (( TEST )); then
         Sources/Vorssaint/Services/RadialMenu/RadialMenuSupport.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadSupport.swift
         Sources/Vorssaint/Services/QuickTools/ScratchpadStore.swift
+        Sources/Vorssaint/Services/QuickTools/ScratchpadLiveMarkdown.swift
         Sources/Vorssaint/Services/KillProcess/KillProcessSupport.swift
         Sources/Vorssaint/Services/Recorder/RecorderSupport.swift
         Sources/Vorssaint/Services/Recorder/RecorderSampleTiming.swift
