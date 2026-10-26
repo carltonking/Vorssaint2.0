@@ -40,6 +40,9 @@ final class NotchHermesVoiceService: ObservableObject {
     private var lastChange = Date()
     /// Receives the transcript when a dictation ends with words in it.
     private var deliver: ((String) -> Void)?
+    /// The conversation the microphone was opened from: why it cannot listen
+    /// is said there, on VERTUS's page or Instinct's.
+    private weak var conversation: NotchHermesChatService?
     /// Which dictation the recognizer's callbacks belong to: one stopped
     /// can still have results queued on the main thread.
     private var generation = 0
@@ -66,8 +69,11 @@ final class NotchHermesVoiceService: ObservableObject {
 
     /// The microphone button: starts listening, or stops and sends what was
     /// heard to `deliver`.
-    func toggleDictation(deliver: @escaping (String) -> Void) {
-        if phase == .idle { self.deliver = deliver }
+    func toggleDictation(in chat: NotchHermesChatService = .shared, deliver: @escaping (String) -> Void) {
+        if phase == .idle {
+            self.deliver = deliver
+            conversation = chat
+        }
         handle(.toggle)
     }
 
@@ -93,7 +99,7 @@ final class NotchHermesVoiceService: ObservableObject {
             guard startListening() else {
                 deliver = nil
                 phase = .idle
-                NotchHermesChatService.shared.addNote(text.dictationUnavailable)
+                (conversation ?? .shared).addNote(text.dictationUnavailable)
                 return
             }
         case .stopAndSend:
@@ -103,7 +109,7 @@ final class NotchHermesVoiceService: ObservableObject {
             if !words.isEmpty { receiver?(words) }
         case .explainDenied:
             deliver = nil
-            NotchHermesChatService.shared.addNote(text.dictationDenied)
+            (conversation ?? .shared).addNote(text.dictationDenied)
         }
     }
 

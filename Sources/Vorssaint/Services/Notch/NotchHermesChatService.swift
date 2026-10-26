@@ -12,10 +12,84 @@ import Foundation
 /// carries over between openings of the island, and turning the switch off
 /// ends the connection and drops the transcript.
 ///
+/// The same service carries the Instinct page (`instinct`): a hosted agent
+/// the person texts, reached through the Messages thread with its number.
+/// Each page has its own feature, switch, shortcut, saved history and
+/// transport; the transcript, the turn and the attention it asks for work the
+/// same way on both.
+///
 /// Main thread only, like the island it belongs to. The client reads on a
 /// queue of its own and answers here on the main thread.
 final class NotchHermesChatService: ObservableObject {
-    static let shared = NotchHermesChatService()
+    /// Which conversation an instance carries.
+    enum Agent {
+        case vertus, instinct
+
+        var feature: AppFeature {
+            switch self {
+            case .vertus: return AppFeature.notchHermesChat
+            case .instinct: return AppFeature.notchInstinctChat
+            }
+        }
+
+        var enabledKey: String {
+            switch self {
+            case .vertus: return DefaultsKey.notchHermesChatEnabled
+            case .instinct: return DefaultsKey.notchInstinctChatEnabled
+            }
+        }
+
+        var module: NotchModule {
+            switch self {
+            case .vertus: return .hermesChat
+            case .instinct: return .instinctChat
+            }
+        }
+
+        var speakRepliesKey: String {
+            switch self {
+            case .vertus: return DefaultsKey.notchHermesChatSpeakReplies
+            case .instinct: return DefaultsKey.notchInstinctSpeakReplies
+            }
+        }
+
+        var shortcutEnabledKey: String {
+            switch self {
+            case .vertus: return DefaultsKey.notchHermesChatShortcutEnabled
+            case .instinct: return DefaultsKey.notchInstinctShortcutEnabled
+            }
+        }
+
+        var shortcutKey: String {
+            switch self {
+            case .vertus: return DefaultsKey.notchHermesChatShortcut
+            case .instinct: return DefaultsKey.notchInstinctShortcut
+            }
+        }
+
+        var shortcutDefault: GlobalShortcut {
+            switch self {
+            case .vertus: return .vertusChatDefault
+            case .instinct: return .instinctChatDefault
+            }
+        }
+
+        var historyFile: String {
+            switch self {
+            case .vertus: return "vertus-chat.json"
+            case .instinct: return "instinct-chat.json"
+            }
+        }
+
+        /// VERTUS takes one prompt at a time, so a message typed while it
+        /// writes waits its turn. Texts can follow each other freely.
+        var holdsMessagesWhileWorking: Bool { self == .vertus }
+    }
+
+    static let shared = NotchHermesChatService(agent: .vertus)
+    static let instinct = NotchHermesChatService(agent: .instinct)
+
+    let agent: Agent
 
     enum State: Equatable {
         /// The feature is off, or the island is gone.
@@ -35,6 +109,11 @@ final class NotchHermesChatService: ObservableObject {
         /// The server started but could not be spoken to, in its own words
         /// or the island's.
         case unreachable(String)
+        /// The conversation is the Messages thread, which macOS lets this app
+        /// read only with Full Disk Access.
+        case needsFullDiskAccess
+        /// Instinct's number has not been given yet.
+        case noNumber
     }
 
     @Published private(set) var state: State = .off
@@ -43,9 +122,19 @@ final class NotchHermesChatService: ObservableObject {
         // replace the file before it was read.
         didSet { if historyRestored, messages != oldValue { historyStore.save(messages) } }
     }
-    private let historyStore = NotchHermesChatHistoryStore()
+    private let historyStore: NotchHermesChatHistoryStore
     private var historyRestored = false
     private var historyRequested = false
+    /// The other side's own copy of the conversation came in (Instinct's
+    /// Messages thread). It is newer than anything saved here, so a saved
+    /// history read after it is not put back in front of it.
+    private var threadArrived = false
+    /// Messages sent from here that Messages has not echoed back yet. The
+    /// echo carries the message's lasting identity and takes their place.
+    private var unconfirmed: [UUID] = []
+    /// When Instinct last answered a turn, so a second message right behind
+    /// the first still reads as the answer.
+    private var lastAnswer: Date?
 
     /// Brings back the conversation from earlier launches, once.
     private func restoreHistory() {
@@ -53,8 +142,12 @@ final class NotchHermesChatService: ObservableObject {
         historyRequested = true
         historyStore.load { [weak self] saved in
             guard let self else { return }
-            let merged = NotchHermesChatHistory.restored(saved: saved, current: self.messages)
             self.historyRestored = true
+            if self.threadArrived {
+                self.historyStore.save(self.messages)
+                return
+            }
+            let merged = NotchHermesChatHistory.restored(saved: saved, current: self.messages)
             if merged != self.messages { self.messages = merged }
         }
     }
@@ -103,29 +196,46 @@ final class NotchHermesChatService: ObservableObject {
     /// is not fetched back.
     private let watchCursor = VertusWatchCursor()
 
-    /// ⇧⌘K by default: opens the island on this page.
-    private let hotkey = QuickToolHotkey(id: 82)
+    /// ⇧⌘K (VERTUS) or ⇧⌘L (Instinct) by default: opens the island on
+    /// this page.
+    private let hotkey: QuickToolHotkey
     @Published private(set) var shortcutRegistrationFailed = false
 
-    private init() {
-        hotkey.onPress = { NotchService.shared.showHermesChat(toggle: true) }
+    private init(agent: Agent) {
+        self.agent = agent
+        historyStore = NotchHermesChatHistoryStore(fileName: agent.historyFile)
+        switch agent {
+        case .vertus:
+            hotkey = QuickToolHotkey(id: 82)
+            hotkey.onPress = { NotchService.shared.showHermesChat(toggle: true) }
+        case .instinct:
+            hotkey = QuickToolHotkey(id: 83)
+            hotkey.onPress = { NotchService.shared.showInstinctChat(toggle: true) }
+        }
     }
 
     /// Registers the page's shortcut while the feature, its switch and the
     /// island are on; anything else releases it.
     func syncShortcut() {
         let defaults = UserDefaults.standard
-        let enabled = AppFeature.notchHermesChat.isAvailable && AppFeature.notch.isAvailable
-            && defaults.bool(forKey: DefaultsKey.notchHermesChatEnabled)
-            && defaults.bool(forKey: DefaultsKey.notchHermesChatShortcutEnabled)
-        let shortcut = GlobalShortcut.saved(for: DefaultsKey.notchHermesChatShortcut, fallback: .vertusChatDefault)
+        let enabled = agent.feature.isAvailable && AppFeature.notch.isAvailable
+            && defaults.bool(forKey: agent.enabledKey)
+            && defaults.bool(forKey: agent.shortcutEnabledKey)
+        let shortcut = GlobalShortcut.saved(for: agent.shortcutKey, fallback: agent.shortcutDefault)
         shortcutRegistrationFailed = !hotkey.sync(enabled: enabled, shortcut: shortcut,
-                                                  storageKey: DefaultsKey.notchHermesChatShortcut)
+                                                  storageKey: agent.shortcutKey)
     }
 
-    private var text: NotchHermesChatStrings {
-        FeatureStrings.notchHermesChat(L10n.shared.language)
+    /// The page's words: VERTUS's, or the same page naming Instinct.
+    func strings(_ language: AppLanguage) -> NotchHermesChatStrings {
+        let words = FeatureStrings.notchHermesChat(language)
+        switch agent {
+        case .vertus: return words
+        case .instinct: return FeatureStrings.notchInstinctChat(language).chat(words)
+        }
     }
+
+    private var text: NotchHermesChatStrings { strings(L10n.shared.language) }
 
     // MARK: Lifecycle
 
@@ -133,10 +243,10 @@ final class NotchHermesChatService: ObservableObject {
     /// Settings. Called by the feature runtime and by the settings controls.
     func syncWithPreferences() {
         syncShortcut()
-        if AppFeature.notchHermesChat.isAvailable,
-           UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatEnabled) { restoreHistory() }
-        guard AppFeature.notchHermesChat.isAvailable,
-              UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatEnabled),
+        if agent.feature.isAvailable,
+           UserDefaults.standard.bool(forKey: agent.enabledKey) { restoreHistory() }
+        guard agent.feature.isAvailable,
+              UserDefaults.standard.bool(forKey: agent.enabledKey),
               AppFeature.notch.isAvailable
         else {
             stop()
@@ -164,6 +274,7 @@ final class NotchHermesChatService: ObservableObject {
         currentRun = nil
         releasePin()
         heldMessage = nil
+        unconfirmed = []
         // Switched off is a fresh start: turning it back on does not replay
         // everything VERTUS said in between.
         watchCursor.reset()
@@ -190,8 +301,12 @@ final class NotchHermesChatService: ObservableObject {
     }
 
     private func connect() {
-        guard AppFeature.notchHermesChat.isAvailable, AppFeature.notch.isAvailable else { return }
+        guard agent.feature.isAvailable, AppFeature.notch.isAvailable else { return }
         let home = FileManager.default.homeDirectoryForCurrentUser
+        if agent == .instinct {
+            connectToMessages(home: home)
+            return
+        }
         // The hub owns VERTUS when it is installed: one agent for every
         // surface, rather than a second engine with its own model and memory.
         if VertusHubSupport.token(home: home) != nil {
@@ -234,14 +349,44 @@ final class NotchHermesChatService: ObservableObject {
         client.start()
     }
 
+    /// Instinct's thread, through `imsg`: the number from Settings, the tool
+    /// wherever Homebrew or the PATH put it.
+    private func connectToMessages(home: URL) {
+        let number = (UserDefaults.standard.string(forKey: DefaultsKey.notchInstinctNumber) ?? "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !number.isEmpty else {
+            state = .failed(.noNumber)
+            return
+        }
+        guard let executable = HermesACPSupport.executable(
+            command: InstinctMessagesSupport.defaultCommand, home: home,
+            searchPath: ProcessInfo.processInfo.environment["PATH"])
+        else {
+            state = .failed(.notFound(InstinctMessagesSupport.defaultCommand))
+            return
+        }
+        if state != .connecting { state = .connecting }
+        let current = UUID()
+        generation = current
+        let client = NotchInstinctMessagesClient(
+            executable: executable, number: number,
+            environment: HermesACPSupport.environment(executable: executable, searchPath: nil)
+        ) { [weak self] event in
+            guard let self, self.generation == current else { return }
+            self.handle(event)
+        }
+        self.client = client
+        client.start()
+    }
+
     // MARK: Sending
 
     /// Sends a message, starting the server again if it is not running.
     func send(_ message: String) {
         let words = message.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty else { return }
-        guard AppFeature.notchHermesChat.isAvailable,
-              UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatEnabled)
+        guard agent.feature.isAvailable,
+              UserDefaults.standard.bool(forKey: agent.enabledKey)
         else { return }
         // A new message talks over the old reply: the reading stops.
         NotchHermesVoiceService.existing?.stopSpeaking()
@@ -257,7 +402,7 @@ final class NotchHermesChatService: ObservableObject {
         }
         // The turn before this one is still writing; Hermes takes one prompt
         // at a time, so the message waits rather than being dropped.
-        if working {
+        if working, agent.holdsMessagesWhileWorking {
             heldMessage = words
             return
         }
@@ -265,7 +410,9 @@ final class NotchHermesChatService: ObservableObject {
     }
 
     private func beginTurn(_ words: String) {
-        messages.append(NotchHermesChatMessage(role: .person, text: words))
+        let message = NotchHermesChatMessage(role: .person, text: words)
+        unconfirmed.append(message.id)
+        messages.append(message)
         messages = HermesACPSupport.trimmed(messages)
         reply = ""
         thinking = ""
@@ -305,6 +452,7 @@ final class NotchHermesChatService: ObservableObject {
         reply = ""
         thinking = ""
         heldMessage = nil
+        unconfirmed = []
     }
 
     // MARK: Events
@@ -365,6 +513,53 @@ final class NotchHermesChatService: ObservableObject {
             finish(.endTurn)
         case .failed(let reason):
             fail(.unreachable(reason))
+        case .needsFullDiskAccess:
+            fail(.needsFullDiskAccess)
+        case .thread(let thread):
+            threadArrived = true
+            unconfirmed = []
+            let merged = InstinctMessagesSupport.merged(thread: thread, current: messages)
+            if merged != messages { messages = merged }
+        case .delivered(let message):
+            confirm(message)
+        case .received(let message):
+            receive(message)
+        }
+    }
+
+    /// A message of the person's came back from Messages. One sent from here
+    /// takes its lasting identity; one sent from the phone joins the thread.
+    private func confirm(_ message: NotchHermesChatMessage) {
+        guard !messages.contains(where: { $0.id == message.id }) else { return }
+        if let index = messages.indices.reversed().first(where: {
+            unconfirmed.contains(messages[$0].id) && messages[$0].text == message.text
+        }) {
+            unconfirmed.removeAll { $0 == messages[index].id }
+            messages[index] = message
+        } else {
+            append(message)
+        }
+    }
+
+    /// A whole message from the agent. While a turn waits (or right behind
+    /// the message that answered one) it is the answer; otherwise the agent
+    /// wrote on its own and asks for attention as VERTUS's routines do.
+    private func receive(_ message: NotchHermesChatMessage) {
+        guard !messages.contains(where: { $0.id == message.id }) else { return }
+        if InstinctMessagesSupport.isUnprompted(waiting: working, lastAnswer: lastAnswer, at: message.date) {
+            append(NotchHermesChatMessage(id: message.id, role: .proactive, text: message.text, date: message.date))
+            reachOut(routine: nil)
+            return
+        }
+        lastAnswer = message.date
+        append(message)
+        guard working else { return }
+        completedReplies += 1
+        reactOutsideConversation(.celebrate)
+        working = false
+        if let held = heldMessage {
+            heldMessage = nil
+            beginTurn(held)
         }
     }
 
@@ -404,9 +599,21 @@ final class NotchHermesChatService: ObservableObject {
 
     /// Why there is no conversation, as a line of it.
     private func note(_ failure: Failure) -> NotchHermesChatMessage {
+        NotchHermesChatMessage(role: .note, text: describe(failure, language: L10n.shared.language))
+    }
+
+    /// Why there is no conversation, in the page's words. The Full Disk
+    /// Access line names this build, since a developer build is an entry of
+    /// its own in System Settings.
+    func describe(_ failure: Failure, language: AppLanguage) -> String {
+        let text = strings(language)
         switch failure {
-        case .notFound(let command): return NotchHermesChatMessage(role: .note, text: text.notFound(command))
-        case .unreachable(let reason): return NotchHermesChatMessage(role: .note, text: text.unreachable(reason))
+        case .notFound(let command): return text.notFound(command)
+        case .unreachable(let reason): return text.unreachable(reason)
+        case .needsFullDiskAccess:
+            let app = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? AppInfo.name
+            return FeatureStrings.notchInstinctChat(language).fullDiskAccess(app)
+        case .noNumber: return FeatureStrings.notchInstinctChat(language).noNumber
         }
     }
 
@@ -416,7 +623,7 @@ final class NotchHermesChatService: ObservableObject {
         // Every finished reply and unasked message passes through here, so
         // this is the one place that reads them aloud when the speaker is on.
         if NotchHermesVoiceSupport.shouldSpeak(
-            message.role, enabled: UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatSpeakReplies)) {
+            message.role, enabled: UserDefaults.standard.bool(forKey: agent.speakRepliesKey)) {
             NotchHermesVoiceService.shared.speak(message.text)
         }
     }
@@ -465,12 +672,12 @@ final class NotchHermesChatService: ObservableObject {
         // Pinned, so moving the pointer away or switching apps does not put
         // the card away while the agent waits; unpinned once all settle.
         if !notch.pinned { pinnedForApproval = true }
-        if notch.expanded && notch.selected == .hermesChat {
+        if notch.expanded && notch.selected == agent.module {
             notch.pinned = true
             return
         }
         notch.reactMascot(.surprised)
-        notch.open(.hermesChat, pinned: true, takeFocus: false)
+        notch.open(agent.module, pinned: true, takeFocus: false)
     }
 
     /// VERTUS has something to say, unasked. Nothing waits on it, so unlike
@@ -484,7 +691,7 @@ final class NotchHermesChatService: ObservableObject {
         let notch = NotchService.shared
         switch NotchAgentReachOut.attention(
             expanded: notch.expanded,
-            onChat: notch.selected == .hermesChat,
+            onChat: notch.selected == agent.module,
             covered: notch.showingSections || notch.showingAppPanel || notch.showingCommandBar,
             hour: Calendar.current.component(.hour, from: Date()),
             routine: routine) {
@@ -499,7 +706,7 @@ final class NotchHermesChatService: ObservableObject {
             // land unseen. It holds open like a notification, then lets go
             // unless something else (an approval, the user) is keeping it.
             let wasPinned = notch.pinned
-            notch.open(.hermesChat, pinned: true, takeFocus: false)
+            notch.open(agent.module, pinned: true, takeFocus: false)
             guard !wasPinned else { return }
             messagePinGeneration += 1
             let generation = messagePinGeneration
@@ -515,7 +722,7 @@ final class NotchHermesChatService: ObservableObject {
     /// or could not.
     private func reactOutsideConversation(_ reaction: NotchMascotReaction) {
         let notch = NotchService.shared
-        guard !(notch.expanded && notch.selected == .hermesChat) else { return }
+        guard !(notch.expanded && notch.selected == agent.module) else { return }
         notch.reactMascot(reaction)
     }
 

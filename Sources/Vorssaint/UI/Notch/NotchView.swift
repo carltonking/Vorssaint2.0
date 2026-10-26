@@ -600,6 +600,7 @@ struct NotchView: View {
             case .agents: NotchAgentsView(size: pageSize)
             case .watch: NotchWatchView(size: pageSize)
             case .hermesChat: NotchHermesChatView(size: pageSize)
+            case .instinctChat: NotchHermesChatView(size: pageSize, chat: .instinct)
             }
         }
     }
@@ -836,6 +837,7 @@ extension NotchModule: PanelOrderItem {
         case .agents: return FeatureStrings.notchAgents(language).title
         case .watch: return FeatureStrings.notchWatch(language).title
         case .hermesChat: return FeatureStrings.notchHermesChat(language).title
+        case .instinctChat: return FeatureStrings.notchInstinctChat(language).title
         }
     }
 }

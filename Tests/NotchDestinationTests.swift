@@ -886,5 +886,44 @@ enum NotchDestinationContract {
         refused.syncShortcut()
         suite.expect(failed && !refused.shortcutRegistrationFailed && refused.shortcutFailureWrites == 2,
                      "a refused island shortcut reports the failure and its end once each, not on every sync")
+        agentPageContracts(defaults: defaults, suite: suite)
+    }
+
+    /// ⇧⌘K opens VERTUS, ⇧⌘L opens Instinct, and the island's own shortcut
+    /// means the regular island: each switches the open island to its page
+    /// rather than closing it first, and only a second press of the page's
+    /// own shortcut closes it.
+    private static func agentPageContracts(defaults: UserDefaults, suite: TestSuite) {
+        defaults.set(true, forKey: DefaultsKey.notchHermesChatEnabled)
+        defaults.set(true, forKey: DefaultsKey.notchInstinctChatEnabled)
+        defer {
+            defaults.set(false, forKey: DefaultsKey.notchHermesChatEnabled)
+            defaults.set(false, forKey: DefaultsKey.notchInstinctChatEnabled)
+        }
+        let island = Service()
+        island.installHotkey()
+        island.open(.music)
+        island.showInstinctChat(toggle: true)
+        suite.expect(island.expanded && island.selected == .instinctChat,
+                     "the Instinct shortcut switches the open island to Instinct without closing it")
+        island.showHermesChat(toggle: true)
+        suite.expect(island.expanded && island.selected == .hermesChat,
+                     "the VERTUS shortcut switches from Instinct straight to VERTUS")
+        island.showInstinctChat(toggle: true)
+        suite.expect(island.expanded && island.selected == .instinctChat,
+                     "the Instinct shortcut switches from VERTUS straight back to Instinct")
+        island.hotkey.onPress?()
+        suite.expect(island.expanded && island.selected == .music,
+                     "the island shortcut leaves an agent's page for the page the island showed before")
+        island.showHermesChat(toggle: true)
+        island.showHermesChat(toggle: true)
+        suite.expect(!island.expanded, "a second press of an agent's shortcut on its page closes the island")
+        island.hotkey.onPress?()
+        suite.expect(island.expanded && island.selected == .music,
+                     "the island shortcut never reopens onto an agent's page")
+        island.collapse()
+        island.showInstinctChat(toggle: true)
+        suite.expect(island.expanded && island.selected == .instinctChat,
+                     "the Instinct shortcut opens a closed island on Instinct")
     }
 }

@@ -7,8 +7,13 @@ import Foundation
 import CoreGraphics
 
 enum NotchModule: String, CaseIterable, Identifiable {
-    case controls, mixer, music, clipboard, captures, files, system, tools, calendar, notifications, timer, camera, downloads, scratchpad, agents, watch, hermesChat
+    case controls, mixer, music, clipboard, captures, files, system, tools, calendar, notifications, timer, camera, downloads, scratchpad, agents, watch, hermesChat, instinctChat
     var id: String { rawValue }
+
+    /// A conversation with an agent (VERTUS, Instinct). Each opens from a
+    /// shortcut of its own, so the island's shortcut switches away from it
+    /// rather than closing it, and never reopens onto it.
+    var isAgentChat: Bool { self == .hermesChat || self == .instinctChat }
 
     var symbol: String {
         switch self {
@@ -32,6 +37,7 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .agents: return "sparkles"
         case .watch: return "eye"
         case .hermesChat: return "bubble.left.and.bubble.right"
+        case .instinctChat: return "message"
         }
     }
 
@@ -55,6 +61,7 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .agents: return "g"
         case .watch: return "o"
         case .hermesChat: return "h"
+        case .instinctChat: return "x"
         }
     }
 
@@ -79,6 +86,7 @@ enum NotchModule: String, CaseIterable, Identifiable {
         case .agents: return AppFeature.notchAgents.isAvailable(in: defaults)
         case .watch: return AppFeature.notchWatch.isAvailable(in: defaults)
         case .hermesChat: return AppFeature.notchHermesChat.isAvailable(in: defaults)
+        case .instinctChat: return AppFeature.notchInstinctChat.isAvailable(in: defaults)
         case .system:
             return [.monitorCPU, .monitorGPU, .monitorMemory, .monitorNetwork,
                     .monitorDisk, .monitorPower, .fanControl, .connectedDevices].contains { (feature: AppFeature) in
@@ -1862,6 +1870,7 @@ enum NotchSupport {
                 && ($0 != .agents || defaults.bool(forKey: DefaultsKey.notchAgentsEnabled))
                 && ($0 != .watch || defaults.bool(forKey: DefaultsKey.notchWatchEnabled))
                 && ($0 != .hermesChat || defaults.bool(forKey: DefaultsKey.notchHermesChatEnabled))
+                && ($0 != .instinctChat || defaults.bool(forKey: DefaultsKey.notchInstinctChatEnabled))
         }
     }
 
@@ -2778,7 +2787,7 @@ struct NotchGeometry: Equatable {
                 contentHeight = min(budget, agentsHeight.map { $0 > 0 ? $0 : NotchLayout.emptyHeight } ?? budget)
             // Lists and previews fill the chosen content budget.
             case .mixer, .calendar, .clipboard, .captures, .files, .notifications, .downloads, .camera, .scratchpad, .watch,
-                 .hermesChat:
+                 .hermesChat, .instinctChat:
                 contentHeight = budget
             }
         }

@@ -4,53 +4,55 @@
 import Foundation
 
 /// The Hermes page's words: what the settings say, and what a conversation
-/// that is starting, stopped or refused says for itself.
+/// that is starting, stopped or refused says for itself. Fields are `var` so
+/// the Instinct page, the same page on another conversation, can put its own
+/// name where VERTUS's stands (`NotchInstinctChatStrings.chat`).
 struct NotchHermesChatStrings {
-    let title: String
-    let description: String
-    let enable: String
-    let cliPath: String
-    let cliPathPlaceholder: String
-    let cliPathHint: String
-    let requiresDynamicIsland: String
-    let enableDynamicIsland: String
-    let connecting: String
-    let ready: String
-    let placeholder: String
-    let send: String
-    let stop: String
-    let clear: String
-    let retry: String
-    let emptyTitle: String
-    let emptySubtitle: String
-    let thinking: String
-    let stopped: String
-    let stoppedAtLimit: String
-    let stoppedAtStepLimit: String
-    let refusedByAgent: String
-    let refusedCommand: String
-    let refusedCommandFormat: String
-    let notFoundFormat: String
-    let unreachableFormat: String
-    let you: String
-    let copyMessage: String
-    let editMessage: String
-    let approvalTitle: String
-    let allowOnce: String
-    let allowSession: String
-    let allowAlways: String
-    let deny: String
-    let approvalAllowed: String
-    let approvalDenied: String
-    let approvalExpired: String
-    let reachedOut: String
-    let reachedOutFormat: String
-    let dictate: String
-    let stopDictation: String
-    let listening: String
-    let dictationDenied: String
-    let dictationUnavailable: String
-    let speakReplies: String
+    var title: String
+    var description: String
+    var enable: String
+    var cliPath: String
+    var cliPathPlaceholder: String
+    var cliPathHint: String
+    var requiresDynamicIsland: String
+    var enableDynamicIsland: String
+    var connecting: String
+    var ready: String
+    var placeholder: String
+    var send: String
+    var stop: String
+    var clear: String
+    var retry: String
+    var emptyTitle: String
+    var emptySubtitle: String
+    var thinking: String
+    var stopped: String
+    var stoppedAtLimit: String
+    var stoppedAtStepLimit: String
+    var refusedByAgent: String
+    var refusedCommand: String
+    var refusedCommandFormat: String
+    var notFoundFormat: String
+    var unreachableFormat: String
+    var you: String
+    var copyMessage: String
+    var editMessage: String
+    var approvalTitle: String
+    var allowOnce: String
+    var allowSession: String
+    var allowAlways: String
+    var deny: String
+    var approvalAllowed: String
+    var approvalDenied: String
+    var approvalExpired: String
+    var reachedOut: String
+    var reachedOutFormat: String
+    var dictate: String
+    var stopDictation: String
+    var listening: String
+    var dictationDenied: String
+    var dictationUnavailable: String
+    var speakReplies: String
 
     func notFound(_ command: String) -> String { String(format: notFoundFormat, command) }
 

@@ -191,6 +191,8 @@ enum SettingsBackupSupport {
         // A fit measured against one Mac's camera housing would misfit another's.
         DefaultsKey.notchCameraFitWidth,
         DefaultsKey.notchCameraFitHeight,
+        // Whom this person texts is private, and one Mac's Messages thread.
+        DefaultsKey.notchInstinctNumber,
     ]
 
     /// The file's content: an envelope with the format version, the app

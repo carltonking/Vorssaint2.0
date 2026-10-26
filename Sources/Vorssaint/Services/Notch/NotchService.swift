@@ -1191,25 +1191,26 @@ final class NotchService: ObservableObject {
     func toggleFromShortcut() {
         guard acceptsUserInteraction else { return }
         if captureControls != nil { expandCaptureControls(); return }
-        // VERTUS has its own shortcut, so the island's shortcut means "the
-        // regular island": from the VERTUS page it switches over instead of
-        // closing, and it never reopens onto VERTUS.
-        let onVertus = selected == .hermesChat && selectedMetric == nil
+        // VERTUS and Instinct have shortcuts of their own, so the island's
+        // shortcut means "the regular island": from an agent's page it
+        // switches over instead of closing, and it never reopens onto one.
+        let onAgent = selected.isAgentChat && selectedMetric == nil
             && !showingAppPanel && !showingSections && !showingCommandBar
         if expanded {
-            if onVertus { open(regularPage) } else { collapseFromShortcut() }
-        } else if reopeningDestination.module == .hermesChat {
+            if onAgent { open(regularPage) } else { collapseFromShortcut() }
+        } else if reopeningDestination.module.isAgentChat {
             open(regularPage)
         } else {
             open()
         }
     }
 
-    /// The page the island showed before VERTUS took it, else its first page.
-    private var pageBeforeVertus: NotchModule?
+    /// The page the island showed before an agent's page took it, else its
+    /// first page.
+    private var pageBeforeAgent: NotchModule?
     private var regularPage: NotchModule {
-        if let page = pageBeforeVertus, page != .hermesChat, modules.contains(page) { return page }
-        return modules.first { $0 != .hermesChat } ?? .controls
+        if let page = pageBeforeAgent, !page.isAgentChat, modules.contains(page) { return page }
+        return modules.first { !$0.isAgentChat } ?? .controls
     }
 
     /// While only a shortcut may open or close the island, a shortcut (or the
@@ -1956,11 +1957,23 @@ final class NotchService: ObservableObject {
 
     /// Opens the VERTUS chat page from its shortcut; a second press closes it.
     func showHermesChat(toggle: Bool = false) {
-        if toggle, expanded, selected == .hermesChat, selectedMetric == nil,
+        showAgentChat(.hermesChat, toggle: toggle)
+    }
+
+    /// Opens the Instinct chat page from its shortcut; a second press closes it.
+    func showInstinctChat(toggle: Bool = false) {
+        showAgentChat(.instinctChat, toggle: toggle)
+    }
+
+    /// An agent's page, from its shortcut. From the regular island or the
+    /// other agent's page it switches over without closing first, and the
+    /// regular page is remembered for the island's own shortcut to return to.
+    private func showAgentChat(_ page: NotchModule, toggle: Bool) {
+        if toggle, expanded, selected == page, selectedMetric == nil,
            !showingAppPanel, !showingSections, !showingCommandBar { collapseFromShortcut(); return }
         let current = expanded ? selected : reopeningDestination.module
-        if current != .hermesChat { pageBeforeVertus = current }
-        open(.hermesChat)
+        if !current.isAgentChat { pageBeforeAgent = current }
+        open(page)
     }
 
     /// Opens the System page; with `toggle`, a second press closes it.

@@ -181,6 +181,7 @@ struct NotchPagePreview: View {
         // The page draws whatever the shared conversation holds; a preview
         // never starts the agent itself.
         case .hermesChat: NotchHermesChatView(size: size)
+        case .instinctChat: NotchHermesChatView(size: size, chat: .instinct)
         }
     }
 
@@ -410,6 +411,7 @@ extension NotchModule {
         case .agents: return Color(red: 0.85, green: 0.47, blue: 0.34)
         case .watch: return .purple
         case .hermesChat: return Color(red: 0.62, green: 0.44, blue: 0.86)
+        case .instinctChat: return Color(red: 0.20, green: 0.70, blue: 0.45)
         }
     }
 
