@@ -88,7 +88,11 @@ enum VertusHubSupport {
     /// With `since`, the hub first replays what it stored after that event,
     /// so a watch that dropped and reconnects misses nothing in between.
     static func watch(token: String, since: Int? = nil) -> URLRequest {
-        var query = [URLQueryItem(name: "agent_id", value: agentID)]
+        // The fleet stream, not ?agent_id=: the hub feeds the per-agent
+        // stream only from a bridge's live subscribers, and runs it starts
+        // itself (routines) never reached it; the fleet stream carries every
+        // stored event. Other agents' events are dropped in watchEvent.
+        var query: [URLQueryItem] = []
         if let since { query.append(URLQueryItem(name: "since", value: String(since))) }
         var request = request("api/events", token: token, query: query)
         request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
@@ -261,8 +265,16 @@ enum VertusHubSupport {
     }
 
     static func watchEvent(line: String) -> WatchEvent? {
-        guard let event = event(line: line, run: nil) else { return nil }
+        guard !belongsToAnotherAgent(line: line), let event = event(line: line, run: nil) else { return nil }
         return WatchEvent(run: runID(line: line), event: event)
+    }
+
+    private static func belongsToAnotherAgent(line: String) -> Bool {
+        guard line.hasPrefix("data:"),
+              let data = line.dropFirst(5).trimmingCharacters(in: .whitespaces).data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let agent = object["agent_id"] as? String, !agent.isEmpty else { return false }
+        return agent != agentID
     }
 
     private static func runID(line: String) -> String? {
@@ -589,6 +601,10 @@ final class VertusWatchCursor: @unchecked Sendable {
 /// an approval nothing waits on it, so it never pins the island and never
 /// takes a page the person is using.
 enum NotchAgentReachOut: Equatable {
+    /// How long the island stays open for a message nobody asked for, like a
+    /// notification banner, before it may collapse again.
+    static let holdOpen: TimeInterval = 8
+
     /// The conversation is on screen, or now is no time to interrupt: the
     /// message landing is enough.
     case append

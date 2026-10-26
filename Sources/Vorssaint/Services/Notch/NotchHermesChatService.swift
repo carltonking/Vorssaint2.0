@@ -66,6 +66,8 @@ final class NotchHermesChatService: ObservableObject {
     /// The island was pinned open for an approval, so it is unpinned when the
     /// last one settles rather than staying open for good.
     private var pinnedForApproval = false
+    /// The latest proactive message's hold; a newer one restarts it.
+    private var messagePinGeneration = 0
     /// The message typed while the turn before it was still writing.
     private var heldMessage: String?
     /// Where the hub's agent stream was last heard, kept across the clients
@@ -425,7 +427,19 @@ final class NotchHermesChatService: ObservableObject {
             notch.reactMascot(.perk)
         case .open:
             notch.reactMascot(.perk)
-            notch.open(.hermesChat, pinned: false, takeFocus: false)
+            // Opened with the pointer elsewhere, an unpinned island counts as
+            // opened by hover and collapses at once, so the message would
+            // land unseen. It holds open like a notification, then lets go
+            // unless something else (an approval, the user) is keeping it.
+            let wasPinned = notch.pinned
+            notch.open(.hermesChat, pinned: true, takeFocus: false)
+            guard !wasPinned else { return }
+            messagePinGeneration += 1
+            let generation = messagePinGeneration
+            DispatchQueue.main.asyncAfter(deadline: .now() + NotchAgentReachOut.holdOpen) { [weak self] in
+                guard let self, self.messagePinGeneration == generation, !self.pinnedForApproval else { return }
+                NotchService.shared.pinned = false
+            }
         }
     }
 

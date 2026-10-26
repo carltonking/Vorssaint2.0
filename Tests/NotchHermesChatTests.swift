@@ -497,10 +497,13 @@ enum NotchHermesChatTests {
         }
         suite.expect(elsewhere.id == "a9", "an approval from a turn started elsewhere still reaches the island")
         let watch = VertusHubSupport.watch(token: "t")
-        suite.expect(watch.url?.path == "/api/events" && watch.url?.query == "agent_id=primary",
+        suite.expect(watch.url?.path == "/api/events" && watch.url?.query == nil,
                      "the watch follows the hub's own agent, every run")
-        suite.expect(VertusHubSupport.watch(token: "t", since: 412).url?.query == "agent_id=primary&since=412",
+        suite.expect(VertusHubSupport.watch(token: "t", since: 412).url?.query == "since=412",
                      "a watch that dropped resumes after the last event it saw")
+        suite.expect(VertusHubSupport.watchEvent(line: #"data: {"type":"done","agent_id":"alpha","run_id":"x"}"#) == nil
+                     && VertusHubSupport.watchEvent(line: #"data: {"type":"done","agent_id":"primary","run_id":"x"}"#) != nil,
+                     "the fleet watch keeps only the hub agent's events")
         suite.expect(VertusHubSupport.sequence(line: #"data: {"type":"text","seq":412}"#) == 412
                      && VertusHubSupport.sequence(line: ": ping") == nil, "every streamed event names its place")
         suite.expect(request.flatMap { if case .approval(let a) = $0 { return a.runID } else { return nil } } == "r1",
@@ -734,7 +737,7 @@ enum NotchHermesChatTests {
         cursor.advance(to: 41)
         cursor.advance(to: 7)
         suite.expect(cursor.value == 41
-                     && VertusHubSupport.watch(token: "t", since: cursor.value).url?.query == "agent_id=primary&since=41",
+                     && VertusHubSupport.watch(token: "t", since: cursor.value).url?.query == "since=41",
                      "a client started after a retry resumes after the last event any earlier one heard")
         cursor.reset()
         suite.expect(cursor.value == nil, "a conversation switched off starts over live")
