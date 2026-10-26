@@ -125,12 +125,14 @@ enum NotchCompactTests {
         var symbol: String? = nil
         var enabled = true
         var action: () -> Void = {}
+        var children: [NotchMenuItem]? = nil
         static let separator = NotchMenuItem(title: "")
     }
     struct NotchMenuButton<Label: View>: View {
         let title: String
         let items: [NotchMenuItem]
         var cornerRadius: CGFloat = 6
+        var makeItems: (() -> [NotchMenuItem])? = nil
         @ViewBuilder let label: () -> Label
         var body: some View { label() }
     }
