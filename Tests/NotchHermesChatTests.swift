@@ -565,12 +565,33 @@ enum NotchHermesChatTests {
             #"{"type":""# + type + #"","run_id":""# + run + #"","agent_id":"primary"}"#
         }
         /// Feeds lines through the watch's own reading, as the client does,
-        /// and returns every message that came out.
-        func feed(_ replies: inout VertusRoutineReplies, _ lines: [String]) -> [VertusRoutineReplies.Message] {
-            lines.compactMap { json in
-                guard let event = watched(json) else { return nil }
-                return replies.receive(event.event, run: event.run)
+        /// and returns every message that came out. A run asked about is
+        /// answered at once from `kinds`, as the hub would; one missing there
+        /// stays unanswered. Also returns every run asked about.
+        func watch(_ replies: inout VertusRoutineReplies, _ lines: [String],
+                   kinds: [String: VertusRoutineReplies.Kind] = [:]) -> (messages: [VertusRoutineReplies.Message], asked: [String]) {
+            var messages: [VertusRoutineReplies.Message] = []
+            var asked: [String] = []
+            for json in lines {
+                guard let event = watched(json) else { continue }
+                switch replies.receive(event.event, run: event.run) {
+                case .message(let message)?: messages.append(message)
+                case .lookup(let run)?:
+                    asked.append(run)
+                    if let kind = kinds[run], let message = replies.classify(run: run, as: kind) {
+                        messages.append(message)
+                    }
+                case nil: break
+                }
             }
+            return (messages, asked)
+        }
+        func feed(_ replies: inout VertusRoutineReplies, _ lines: [String],
+                  kinds: [String: VertusRoutineReplies.Kind] = [:]) -> [VertusRoutineReplies.Message] {
+            watch(&replies, lines, kinds: kinds).messages
+        }
+        func activity(_ run: String, _ words: String) -> String {
+            #"{"type":"activity","run_id":""# + run + #"","agent_id":"primary","text":""# + words + #""}"#
         }
 
         suite.expect(watched(fired("r7")) == VertusHubSupport.WatchEvent(run: "r7", event: .routineFired(routine: "rt1", run: "r7")),
@@ -588,10 +609,10 @@ enum NotchHermesChatTests {
         let messages = feed(&replies, [
             fired("r7"), text("r7", "Your flight "), text("terminal", "unrelated words"),
             text("r7", "leaves at **9:40**."), end("terminal"), end("r7"), end("r7"),
-        ])
+        ], kinds: ["terminal": .other])
         suite.expect(messages == [VertusRoutineReplies.Message(run: "r7", routine: "rt1", text: "Your flight leaves at **9:40**.")],
                      "a routine's reply comes out once, whole, when its run is done, and a repeated done sends nothing")
-        suite.expect(feed(&replies, [text("other", "Hello"), end("other")]).isEmpty,
+        suite.expect(feed(&replies, [text("other", "Hello"), end("other")], kinds: ["other": .other]).isEmpty,
                      "a run no routine started, such as the terminal's, is never a message")
         suite.expect(replies.followed == 0, "a finished run is let go")
 
@@ -637,6 +658,87 @@ enum NotchHermesChatTests {
                      && capped[0].text.hasSuffix("…"),
                      "a runaway reply is cut at the limit and says so")
 
+        // The hub sends `routine_fired` to the fleet stream only: on the
+        // agent's stream a routine's run arrives as bare text and done, so
+        // the run is asked about and collected on the hub's say-so.
+        var real = VertusRoutineReplies()
+        let routine = watch(&real, [
+            activity("q1", "thinking…"), text("q1", "Your flight "), text("q1", "leaves at 9:40."), end("q1"),
+        ], kinds: ["q1": .routine("rt1")])
+        suite.expect(routine.messages == [VertusRoutineReplies.Message(run: "q1", routine: "rt1", text: "Your flight leaves at 9:40.")]
+                     && routine.asked == ["q1"],
+                     "a routine's run with no routine_fired is asked about once and its reply delivered")
+        let person = watch(&real, [text("u1", "Sure, here it is."), end("u1")], kinds: ["u1": .other])
+        suite.expect(person.messages.isEmpty && real.followed == 0,
+                     "a run the hub says is not a routine is let go")
+        suite.expect(watch(&real, [activity("u1", "memory write"), text("q1", "late")]).asked.isEmpty,
+                     "a run already settled is not asked about again")
+
+        var held = VertusRoutineReplies()
+        let early = watch(&held, [text("h1", "Rain at 4."), end("h1")])
+        suite.expect(early.messages.isEmpty && early.asked == ["h1"],
+                     "a done heard before the hub says what the run is waits for the answer")
+        suite.expect(held.classify(run: "h1", as: .routine("rt2"))
+                     == VertusRoutineReplies.Message(run: "h1", routine: "rt2", text: "Rain at 4."),
+                     "the held reply goes out when the hub says the run is a routine")
+        suite.expect(held.classify(run: "h1", as: .routine("rt2")) == nil && feed(&held, [end("h1")]).isEmpty,
+                     "a held reply goes out once")
+        var unasked = VertusRoutineReplies()
+        _ = watch(&unasked, [text("h2", "Draft"), end("h2")])
+        suite.expect(unasked.classify(run: "h2", as: .other) == nil && unasked.followed == 0,
+                     "a held run the hub says is someone's turn is dropped")
+
+        var firedLate = VertusRoutineReplies()
+        suite.expect(feed(&firedLate, [text("f1", "Hello "), fired("f1"), text("f1", "there."), end("f1")])
+                     .map(\.text) == ["Hello there."] && firedLate.classify(run: "f1", as: .other) == nil,
+                     "a routine_fired that does arrive names the run, keeping what it wrote before")
+
+        var checkIn = VertusRoutineReplies()
+        suite.expect(feed(&checkIn, [
+            text("c5", "Let me check your mail…"), activity("c5", "running tools…"),
+            activity("c5", "running gmail_search…"), text("c5", "NOTHING_TO_REPORT"), end("c5"),
+        ], kinds: ["c5": .routine("rt1")]).isEmpty,
+                     "a check-in that talks before its tool and ends with nothing to report stays silent")
+        suite.expect(feed(&checkIn, [
+            text("c6", "Checking your calendar."), activity("c6", "running calendar_list…"),
+            text("c6", "Dentist at 3."), end("c6"),
+        ], kinds: ["c6": .routine("rt1")]).map(\.text) == ["Dentist at 3."],
+                     "the message is what the run wrote after its last tool")
+        suite.expect(feed(&checkIn, [
+            text("c7", "Good "), activity("c7", "thinking…"), activity("c7", "running tools…"), text("c7", "morning."), end("c7"),
+        ], kinds: ["c7": .routine("rt1")]).map(\.text) == ["Good morning."],
+                     "thinking, and the unnamed tools line, are not a tool boundary")
+
+        func runJSON(_ object: [String: Any]) -> Data? { try? JSONSerialization.data(withJSONObject: object) }
+        suite.expect(VertusHubSupport.runKind(from: runJSON(["run": ["run_id": "q1", "run_kind": "routine", "routine_id": "rt1",
+                                                                     "source": "routine:rt1"], "messages": []]))
+                     == .routine("rt1"),
+                     "a routine's run is named by its routine")
+        suite.expect(VertusHubSupport.runKind(from: runJSON(["run": ["run_kind": "routine", "routine_id": NSNull(),
+                                                                     "source": "routine:rt9"]])) == .routine("rt9")
+                     && VertusHubSupport.runKind(from: runJSON(["run": ["run_kind": "routine"]])) == .routine(nil),
+                     "a routine's run without its id falls back to its source")
+        suite.expect(VertusHubSupport.runKind(from: runJSON(["run": ["run_kind": "user"]])) == .other
+                     && VertusHubSupport.runKind(from: runJSON(["run": ["run_kind": "handoff"]])) == .other,
+                     "every other run kind is someone's turn")
+        suite.expect(VertusHubSupport.runKind(from: runJSON(["error": "run not found: x"])) == nil
+                     && VertusHubSupport.runKind(from: nil) == nil,
+                     "an answer that describes no run says nothing")
+        let lookup = VertusHubSupport.run("q1", token: "t")
+        suite.expect(lookup.httpMethod == "GET" && lookup.url?.path == "/api/runs/q1"
+                     && lookup.value(forHTTPHeaderField: "Authorization") == "Bearer t",
+                     "a run is looked up by its id")
+
+        let cursor = VertusWatchCursor()
+        suite.expect(cursor.value == nil, "a first watch starts live")
+        cursor.advance(to: 41)
+        cursor.advance(to: 7)
+        suite.expect(cursor.value == 41
+                     && VertusHubSupport.watch(token: "t", since: cursor.value).url?.query == "agent_id=primary&since=41",
+                     "a client started after a retry resumes after the last event any earlier one heard")
+        cursor.reset()
+        suite.expect(cursor.value == nil, "a conversation switched off starts over live")
+
         let listing = try? JSONSerialization.data(withJSONObject: ["routines": [
             ["routine_id": "rt1", "agent_id": "primary", "name": " Morning check-in ", "prompt": "Check in."],
             ["routine_id": "rt2", "agent_id": "primary", "name": "", "prompt": "x"],
@@ -655,13 +757,33 @@ enum NotchHermesChatTests {
     /// A message nobody waits on never pins the island or takes a page in
     /// use, and the line over it says VERTUS wrote first, in every language.
     private static func reachOutContracts(_ suite: TestSuite) {
-        suite.expect(NotchAgentReachOut.attention(expanded: false, showingChat: false) == .open
-                     && NotchAgentReachOut.attention(expanded: false, showingChat: true) == .open,
+        func attention(expanded: Bool, onChat: Bool, covered: Bool = false, hour: Int = 12,
+                       routine: String? = nil) -> NotchAgentReachOut {
+            NotchAgentReachOut.attention(expanded: expanded, onChat: onChat, covered: covered, hour: hour, routine: routine)
+        }
+        suite.expect(attention(expanded: false, onChat: false) == .open
+                     && attention(expanded: false, onChat: true) == .open
+                     && attention(expanded: false, onChat: false, routine: "morning-brief") == .open,
                      "a closed island opens on the conversation")
-        suite.expect(NotchAgentReachOut.attention(expanded: true, showingChat: true) == .append,
+        suite.expect(attention(expanded: true, onChat: true) == .append,
                      "with the conversation on screen the message just lands")
-        suite.expect(NotchAgentReachOut.attention(expanded: true, showingChat: false) == .nudge,
+        suite.expect(attention(expanded: true, onChat: false) == .nudge,
                      "a page in use is not taken; the companion reacts instead")
+        suite.expect(attention(expanded: true, onChat: true, covered: true) == .nudge,
+                     "a conversation covered by the sections, the app panel or the Command Bar is not on screen")
+
+        for hour in [22, 23, 0, 3, 6] {
+            suite.expect(attention(expanded: false, onChat: false, hour: hour) == .append
+                         && attention(expanded: true, onChat: false, hour: hour) == .append,
+                         "at \(hour):00 a message only lands, nothing opens or reacts")
+        }
+        for hour in [7, 12, 21] {
+            suite.expect(attention(expanded: false, onChat: false, hour: hour) == .open,
+                         "at \(hour):00 a closed island still opens")
+        }
+        suite.expect(attention(expanded: false, onChat: false, routine: "memory-consolidation") == .append
+                     && attention(expanded: true, onChat: false, routine: " Memory-Consolidation ") == .append,
+                     "a housekeeping routine never interrupts")
 
         let message = NotchHermesChatMessage(role: .proactive, text: "Hi", source: "Morning check-in")
         suite.expect(message.role == .proactive && message.source == "Morning check-in"

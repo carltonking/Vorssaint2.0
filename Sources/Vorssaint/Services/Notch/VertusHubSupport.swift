@@ -108,6 +108,12 @@ enum VertusHubSupport {
         request("api/routines", token: token, query: [URLQueryItem(name: "agent_id", value: agentID)])
     }
 
+    /// One run as the hub stored it, for what kind of run it is: the
+    /// agent's stream does not say which runs a routine started.
+    static func run(_ run: String, token: String) -> URLRequest {
+        request("api/runs/\(run)", token: token)
+    }
+
     static func cancel(run: String, token: String) -> URLRequest {
         request("api/runs/\(run)/cancel", token: token, method: "POST", body: [:])
     }
@@ -171,6 +177,20 @@ enum VertusHubSupport {
             names[id] = name
         }
         return names
+    }
+
+    /// What `GET /api/runs/<id>` says the run is, or nil when the answer
+    /// does not describe a run. A routine's run carries the routine's id,
+    /// or failing that its source (`routine:<id>`).
+    static func runKind(from data: Data?) -> VertusRoutineReplies.Kind? {
+        let object = data.flatMap { try? JSONSerialization.jsonObject(with: $0) } as? [String: Any]
+        guard let run = object?["run"] as? [String: Any] else { return nil }
+        guard run["run_kind"] as? String == "routine" else { return .other }
+        if let id = run["routine_id"] as? String, !id.isEmpty { return .routine(id) }
+        if let source = run["source"] as? String, source.hasPrefix("routine:"), source.count > "routine:".count {
+            return .routine(String(source.dropFirst("routine:".count)))
+        }
+        return .routine(nil)
     }
 
     /// What the hub said to an answer.
@@ -328,9 +348,14 @@ enum VertusHubSupport {
 /// for. Fed the agent-wide watch one event at a time, this keeps the words of
 /// each routine run until the run ends, and hands back the finished message.
 ///
-/// Only runs a `routine_fired` named are collected. The island's own turns
-/// and the terminal's stream through the same watch and are someone's answer
-/// already, so their words are never kept here.
+/// The agent's stream does not say which runs are routines: the hub sends
+/// `routine_fired` to the fleet-wide stream only, so on the island's watch a
+/// routine's words arrive like anyone else's. A run heard for the first time
+/// is therefore kept aside while the hub is asked what it is
+/// (`GET /api/runs/<id>`), and only a run whose kind is `routine` becomes a
+/// message. The island's own turns and the terminal's stream through the same
+/// watch and are someone's answer already, so their words are let go once the
+/// hub says so. A `routine_fired` that does arrive answers the question early.
 struct VertusRoutineReplies {
     /// What a check-in routine replies when it has nothing worth saying. The
     /// island stays silent then: no line, no companion, no opening.
@@ -346,8 +371,9 @@ struct VertusRoutineReplies {
         }
         return text.trimmingCharacters(in: CharacterSet(charactersIn: "`'\" \n\t")) == silence
     }
-    /// Routine runs followed at once. One whose end the watch never heard
-    /// (the hub restarted mid-run) is let go, oldest first, past this.
+    /// Runs followed at once, asked about or known to be routines. One whose
+    /// end the watch never heard (the hub restarted mid-run) is let go,
+    /// oldest first, past this.
     static let maximumRuns = 8
     /// A message the island will show in a bubble; anything longer is cut
     /// here rather than held in memory for a reply that ran away.
@@ -355,26 +381,57 @@ struct VertusRoutineReplies {
     /// The island's own runs remembered, so a late event of one cannot
     /// start being collected.
     static let maximumOwnRuns = 32
+    /// Runs already settled (not routines, finished, or let go) remembered,
+    /// so a late event of one, such as a memory write after its `done`, is
+    /// not asked about a second time.
+    static let maximumSettledRuns = 64
 
     struct Message: Equatable {
         let run: String
-        let routine: String
+        /// The routine's id, when the hub named it.
+        let routine: String?
         let text: String
+    }
+
+    /// What the hub says a run is.
+    enum Kind: Equatable {
+        /// A routine's run, by the routine's id when the hub gives one.
+        case routine(String?)
+        /// Anything else: a person's turn, the terminal, a message between
+        /// agents. Also what a run the hub could not describe counts as: a
+        /// message nobody asked for is not worth showing on a guess.
+        case other
+    }
+
+    /// What one watch event asks of the client.
+    enum Step: Equatable {
+        /// A run heard for the first time: ask the hub what it is and hand
+        /// the answer to `classify(run:as:)`. Asked once per run.
+        case lookup(String)
+        /// A routine run ended with something to say.
+        case message(Message)
     }
 
     private struct Collecting {
         let run: String
-        let routine: String
+        /// Whether the hub has said this is a routine's run; until then its
+        /// words are held in case it is.
+        var classified: Bool
+        var routine: String?
         var text = ""
         var characters = 0
         var truncated = false
+        /// `done` arrived before the hub said what the run is; the message
+        /// goes out with the answer.
+        var ended = false
     }
 
     /// Oldest first.
     private var collecting: [Collecting] = []
     private var own: [String] = []
+    private var settled: [String] = []
 
-    /// How many routine runs are being followed.
+    /// How many runs are being followed, asked about or collected.
     var followed: Int { collecting.count }
 
     /// A run the island started itself: its reply is the island's turn,
@@ -386,51 +443,145 @@ struct VertusRoutineReplies {
         if own.count > Self.maximumOwnRuns { own.removeFirst(own.count - Self.maximumOwnRuns) }
     }
 
-    /// Takes one watch event; returns a message when a routine run ended
-    /// with something to say.
+    /// Takes one watch event; returns a run to ask the hub about, or a
+    /// message when a routine run ended with something to say.
     ///
     /// A run that fails or is cancelled says nothing on the island. Nobody
     /// asked for it, so a failure is not news worth interrupting for, and a
     /// half-written message would claim attention for words VERTUS never
     /// finished. The hub keeps the failure on the routine itself, where it
     /// counts them and turns off a routine that keeps failing.
-    mutating func receive(_ event: VertusHubSupport.Event, run: String?) -> Message? {
+    mutating func receive(_ event: VertusHubSupport.Event, run: String?) -> Step? {
         if case .routineFired(let routine, let fired) = event {
-            guard !own.contains(fired), !collecting.contains(where: { $0.run == fired }) else { return nil }
-            collecting.append(Collecting(run: fired, routine: routine))
-            if collecting.count > Self.maximumRuns { collecting.removeFirst(collecting.count - Self.maximumRuns) }
-            return nil
+            guard !own.contains(fired), !settled.contains(fired) else { return nil }
+            guard let index = collecting.firstIndex(where: { $0.run == fired }) else {
+                follow(Collecting(run: fired, classified: true, routine: routine))
+                return nil
+            }
+            guard !collecting[index].classified else { return nil }
+            return classify(at: index, routine: routine).map(Step.message)
         }
-        guard let run, let index = collecting.firstIndex(where: { $0.run == run }) else { return nil }
+        guard let run, !own.contains(run), !settled.contains(run) else { return nil }
+        var lookup: Step?
+        if !collecting.contains(where: { $0.run == run }) {
+            follow(Collecting(run: run, classified: false, routine: nil))
+            lookup = .lookup(run)
+        }
+        guard let index = collecting.firstIndex(where: { $0.run == run }) else { return lookup }
         switch event {
         case .text(let words):
+            guard !collecting[index].ended else { return lookup }
             var entry = collecting[index]
             let room = Self.maximumCharacters - entry.characters
             guard room > 0 else {
                 entry.truncated = true
                 collecting[index] = entry
-                return nil
+                return lookup
             }
             let kept = words.count > room ? String(words.prefix(room)) : words
             entry.truncated = entry.truncated || kept.count < words.count
             entry.text += kept
             entry.characters += kept.count
             collecting[index] = entry
-            return nil
+            return lookup
+        case .tool:
+            // What the run says before a tool is narration ("let me check
+            // your mail…"); the message is what it writes after its last
+            // tool, which is also where the check-in's silence is written.
+            var entry = collecting[index]
+            entry.text = ""
+            entry.characters = 0
+            entry.truncated = false
+            collecting[index] = entry
+            return lookup
         case .done:
-            // The hub can repeat `done`; the run is gone after the first, so
-            // a repeat finds nothing to send again.
-            let finished = collecting.remove(at: index)
-            let words = finished.text.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !words.isEmpty, !Self.isSilence(words) else { return nil }
-            return Message(run: finished.run, routine: finished.routine,
-                           text: finished.truncated ? words + "…" : words)
+            // The hub can repeat `done`; the run is settled after the first,
+            // so a repeat finds nothing to send again.
+            guard collecting[index].classified else {
+                collecting[index].ended = true
+                return lookup
+            }
+            return finish(at: index).map(Step.message)
         case .error, .cancelled:
             collecting.remove(at: index)
+            settle(run)
             return nil
         default:
+            return lookup
+        }
+    }
+
+    /// The hub's answer about a run `receive` asked for. A routine's run
+    /// keeps being collected, and one that already ended is delivered now;
+    /// anything else is let go with what it said.
+    mutating func classify(run: String, as kind: Kind) -> Message? {
+        guard let index = collecting.firstIndex(where: { $0.run == run }),
+              !collecting[index].classified else { return nil }
+        switch kind {
+        case .routine(let routine):
+            return classify(at: index, routine: routine)
+        case .other:
+            collecting.remove(at: index)
+            settle(run)
             return nil
         }
+    }
+
+    private mutating func classify(at index: Int, routine: String?) -> Message? {
+        collecting[index].classified = true
+        collecting[index].routine = routine
+        return collecting[index].ended ? finish(at: index) : nil
+    }
+
+    private mutating func finish(at index: Int) -> Message? {
+        let finished = collecting.remove(at: index)
+        settle(finished.run)
+        let words = finished.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, !Self.isSilence(words) else { return nil }
+        return Message(run: finished.run, routine: finished.routine,
+                       text: finished.truncated ? words + "…" : words)
+    }
+
+    private mutating func follow(_ entry: Collecting) {
+        collecting.append(entry)
+        guard collecting.count > Self.maximumRuns else { return }
+        for dropped in collecting.prefix(collecting.count - Self.maximumRuns) { settle(dropped.run) }
+        collecting.removeFirst(collecting.count - Self.maximumRuns)
+    }
+
+    private mutating func settle(_ run: String) {
+        guard !settled.contains(run) else { return }
+        settled.append(run)
+        if settled.count > Self.maximumSettledRuns { settled.removeFirst(settled.count - Self.maximumSettledRuns) }
+    }
+}
+
+/// The last event the hub's agent stream delivered, kept by the service
+/// across the clients it starts, so a watch opened after a retry resumes
+/// where the one before it stopped instead of only hearing what comes next.
+/// Written on a client's queue, read on the main thread when a client is made.
+final class VertusWatchCursor: @unchecked Sendable {
+    private let lock = NSLock()
+    private var seq: Int?
+
+    var value: Int? {
+        lock.lock()
+        defer { lock.unlock() }
+        return seq
+    }
+
+    /// The hub numbers its events in order, so the cursor only moves forward.
+    func advance(to next: Int) {
+        lock.lock()
+        defer { lock.unlock() }
+        seq = max(seq ?? 0, next)
+    }
+
+    /// Forgets the place: a conversation switched off starts over live.
+    func reset() {
+        lock.lock()
+        defer { lock.unlock() }
+        seq = nil
     }
 }
 
@@ -438,7 +589,8 @@ struct VertusRoutineReplies {
 /// an approval nothing waits on it, so it never pins the island and never
 /// takes a page the person is using.
 enum NotchAgentReachOut: Equatable {
-    /// The conversation is on screen: the message landing is enough.
+    /// The conversation is on screen, or now is no time to interrupt: the
+    /// message landing is enough.
     case append
     /// The island is open on something else: the companion reacts, and the
     /// message waits on the chat page.
@@ -448,9 +600,37 @@ enum NotchAgentReachOut: Equatable {
     /// over and away puts it back as it would any island opened by hover.
     case open
 
-    static func attention(expanded: Bool, showingChat: Bool) -> NotchAgentReachOut {
+    /// Local hours in which a message only lands: from 22:00 until 07:00 an
+    /// island that opens or a companion that jumps is a light in a dark room.
+    static let quietHoursStart = 22
+    static let quietHoursEnd = 7
+
+    /// Routines that keep VERTUS's own house (its memory) rather than tell
+    /// the person anything; what they write is kept for reading, never
+    /// interrupts. Matched by the routine's name on the hub.
+    static let quietRoutines: Set<String> = ["memory-consolidation"]
+
+    static func isQuietHour(_ hour: Int) -> Bool {
+        hour >= quietHoursStart || hour < quietHoursEnd
+    }
+
+    static func isQuietRoutine(_ name: String?) -> Bool {
+        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() else { return false }
+        return quietRoutines.contains(name)
+    }
+
+    /// - Parameters:
+    ///   - onChat: the island's selected page is the conversation.
+    ///   - covered: something sits over the selected page (the sections
+    ///     grid, the app panel, the Command Bar), so the conversation is not
+    ///     what is on screen even with it selected.
+    ///   - hour: the local hour, 0–23.
+    ///   - routine: the name of the routine that wrote, when known.
+    static func attention(expanded: Bool, onChat: Bool, covered: Bool,
+                          hour: Int, routine: String?) -> NotchAgentReachOut {
+        if isQuietHour(hour) || isQuietRoutine(routine) { return .append }
         guard expanded else { return .open }
-        return showingChat ? .append : .nudge
+        return onChat && !covered ? .append : .nudge
     }
 }
 

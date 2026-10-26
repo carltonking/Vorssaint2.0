@@ -68,6 +68,12 @@ final class NotchHermesChatService: ObservableObject {
     private var pinnedForApproval = false
     /// The message typed while the turn before it was still writing.
     private var heldMessage: String?
+    /// Where the hub's agent stream was last heard, kept across the clients
+    /// a retry or a send after a failure starts, so the new watch resumes
+    /// there and a routine's message sent in the gap still arrives. Only
+    /// this app's life: a message VERTUS sent while the app was not running
+    /// is not fetched back.
+    private let watchCursor = VertusWatchCursor()
 
     private init() {}
 
@@ -109,6 +115,9 @@ final class NotchHermesChatService: ObservableObject {
         currentRun = nil
         releasePin()
         heldMessage = nil
+        // Switched off is a fresh start: turning it back on does not replay
+        // everything VERTUS said in between.
+        watchCursor.reset()
         if state != .off { state = .off }
         if !messages.isEmpty { messages = [] }
         if !reply.isEmpty { reply = "" }
@@ -138,7 +147,7 @@ final class NotchHermesChatService: ObservableObject {
             if state != .connecting { state = .connecting }
             let current = UUID()
             generation = current
-            let hub = NotchVertusHubClient(home: home) { [weak self] event in
+            let hub = NotchVertusHubClient(home: home, watchCursor: watchCursor) { [weak self] event in
                 guard let self, self.generation == current else { return }
                 self.handle(event)
             }
@@ -282,7 +291,7 @@ final class NotchHermesChatService: ObservableObject {
             // A reply of the island's own turn may be writing below; it
             // lands after this one, in the order the two finished.
             append(NotchHermesChatMessage(role: .proactive, text: words, source: routine))
-            reachOut()
+            reachOut(routine: routine)
         case .finished(let stop):
             finish(stop)
         case .turnFailed(let reason):
@@ -398,11 +407,18 @@ final class NotchHermesChatService: ObservableObject {
     /// VERTUS has something to say, unasked. Nothing waits on it, so unlike
     /// an approval it never pins the island and never takes the page the
     /// person is using: on the conversation the message just lands, on
-    /// another page the companion reacts, and a closed island opens on the
-    /// conversation without the keyboard.
-    private func reachOut() {
+    /// another page (or the conversation under the sections, the app panel
+    /// or the Command Bar) the companion reacts, and a closed island opens on
+    /// the conversation without the keyboard. At night, or from a routine
+    /// that only keeps VERTUS's house, it just lands.
+    private func reachOut(routine: String?) {
         let notch = NotchService.shared
-        switch NotchAgentReachOut.attention(expanded: notch.expanded, showingChat: notch.selected == .hermesChat) {
+        switch NotchAgentReachOut.attention(
+            expanded: notch.expanded,
+            onChat: notch.selected == .hermesChat,
+            covered: notch.showingSections || notch.showingAppPanel || notch.showingCommandBar,
+            hour: Calendar.current.component(.hour, from: Date()),
+            routine: routine) {
         case .append:
             return
         case .nudge:

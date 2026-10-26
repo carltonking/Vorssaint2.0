@@ -62,22 +62,37 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
     /// would see either otherwise.
     private var watch: URLSessionDataTask?
     private var watchReader = VertusHubSupport.LineReader()
-    /// The last event the watch saw, to resume after it on reconnect.
-    private var watchSeq: Int?
+    /// The last event the watch saw, to resume after it on reconnect. Owned
+    /// by the service, so a client started by a retry resumes after the
+    /// last event the one before it heard.
+    private let watchCursor: VertusWatchCursor
+    /// The ledger's waiting approvals are read once per client, before its
+    /// first watch: a cursor carried over from an earlier client says where
+    /// the stream stopped, not which approvals still wait.
+    private var readLedger = false
     /// Routine runs heard on the watch, collected until each one ends.
     private var routineReplies = VertusRoutineReplies()
     /// Routine names by id, asked for when a routine nobody has named yet
-    /// fires; a message that lands before the answer goes out unnamed.
+    /// fires.
     private var routineNames: [String: String] = [:]
     private var askingRoutineNames = false
+    /// Routines that came up unnamed while the names were being asked for;
+    /// asked again when that answer is in and still lacks them.
+    private var unnamedRoutines: Set<String> = []
+    private var askAgainForNames = false
+    /// Messages whose routine is being named right now, sent once the
+    /// answer is in: the name decides whether a housekeeping routine may
+    /// interrupt at all.
+    private var awaitingNames: [VertusRoutineReplies.Message] = []
     /// Stop pressed while the prompt was still being queued: sent as soon as
     /// the hub names the run.
     private var cancelPending = false
     private var turnEnded = false
     private var ended = false
 
-    init(home: URL, onEvent: @escaping (Event) -> Void) {
+    init(home: URL, watchCursor: VertusWatchCursor = VertusWatchCursor(), onEvent: @escaping (Event) -> Void) {
         self.home = home
+        self.watchCursor = watchCursor
         self.onEvent = onEvent
     }
 
@@ -212,13 +227,13 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
     }
 
     /// Holds the agent-wide watch. The first time, it starts from the ledger's
-    /// waiting approvals, which a live stream cannot replay; after a drop it
-    /// resumes from the last event it saw, so nothing raised in between is
-    /// missed.
+    /// waiting approvals, which a live stream cannot replay; after a drop, or
+    /// in a client started by a retry, it resumes from the last event seen,
+    /// so nothing raised in between is missed.
     private func listen() {
         guard !ended, watch == nil, let token else { return }
         watchReader = VertusHubSupport.LineReader()
-        if let since = watchSeq {
+        if readLedger, let since = watchCursor.value {
             openWatch(VertusHubSupport.watch(token: token, since: since))
             return
         }
@@ -228,10 +243,11 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
             guard let self else { return }
             self.queue.async {
                 guard !self.ended, self.watch == nil else { return }
+                self.readLedger = true
                 if let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) {
                     for approval in VertusHubSupport.pendingApprovals(from: data) { self.emit(.approval(approval)) }
                 }
-                self.openWatch(VertusHubSupport.watch(token: token))
+                self.openWatch(VertusHubSupport.watch(token: token, since: self.watchCursor.value))
             }
         }.resume()
     }
@@ -245,7 +261,7 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         if dataTask === watch, !ended {
             for line in watchReader.append(data) {
-                if let seq = VertusHubSupport.sequence(line: line) { watchSeq = max(watchSeq ?? 0, seq) }
+                if let seq = VertusHubSupport.sequence(line: line) { watchCursor.advance(to: seq) }
                 guard let watched = VertusHubSupport.watchEvent(line: line) else { continue }
                 switch watched.event {
                 case .approval(let approval): emit(.approval(approval))
@@ -253,8 +269,10 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
                 case .routineFired(let routine, _): nameRoutine(routine)
                 default: break
                 }
-                if let message = routineReplies.receive(watched.event, run: watched.run) {
-                    emit(.proactive(message.text, routine: routineNames[message.routine]))
+                switch routineReplies.receive(watched.event, run: watched.run) {
+                case .lookup(let run)?: classify(run)
+                case .message(let message)?: deliver(message)
+                case nil: break
                 }
             }
             return
@@ -274,21 +292,77 @@ final class NotchVertusHubClient: NSObject, NotchAgentChatTransport, URLSessionD
         }
     }
 
+    /// Asks the hub what a run the watch just heard of is. The hub stores
+    /// the run before its first event, so the answer is there to give; one
+    /// that does not come counts as not a routine, keeping the island quiet
+    /// rather than showing words nobody may have meant for it.
+    private func classify(_ run: String) {
+        guard !ended, let token else { return }
+        var request = VertusHubSupport.run(run, token: token)
+        request.timeoutInterval = Self.requestTimeout
+        session.dataTask(with: request) { [weak self] data, response, error in
+            guard let self else { return }
+            self.queue.async {
+                guard !self.ended else { return }
+                let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+                let kind = error == nil && (200..<300).contains(status)
+                    ? VertusHubSupport.runKind(from: data) ?? .other : .other
+                if case .routine(let routine?) = kind { self.nameRoutine(routine) }
+                if let message = self.routineReplies.classify(run: run, as: kind) { self.deliver(message) }
+            }
+        }.resume()
+    }
+
+    /// Sends a routine's message on, named when the hub has named it. One
+    /// whose routine is being named waits for that answer, which is quick.
+    private func deliver(_ message: VertusRoutineReplies.Message) {
+        if let routine = message.routine, routineNames[routine] == nil, askingRoutineNames {
+            awaitingNames.append(message)
+            return
+        }
+        emit(.proactive(message.text, routine: message.routine.flatMap { routineNames[$0] }))
+    }
+
     /// Asks the hub what its routines are called, once per routine the
     /// island has not heard named. The run takes far longer than this
-    /// answer, so the name is almost always in before the message is.
+    /// answer, so the name is almost always in before the message is. A
+    /// routine that comes up while an answer is on its way is asked about
+    /// again once that answer is in, if it did not name it.
     private func nameRoutine(_ routine: String) {
-        guard routineNames[routine] == nil, !askingRoutineNames, !ended, let token else { return }
+        guard routineNames[routine] == nil, !ended, let token else { return }
+        unnamedRoutines.insert(routine)
+        guard !askingRoutineNames else {
+            askAgainForNames = true
+            return
+        }
         askingRoutineNames = true
+        askAgainForNames = false
         var request = VertusHubSupport.routines(token: token)
         request.timeoutInterval = Self.requestTimeout
         session.dataTask(with: request) { [weak self] data, response, error in
             guard let self else { return }
             self.queue.async {
                 self.askingRoutineNames = false
-                guard !self.ended, error == nil,
-                      let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) else { return }
-                self.routineNames.merge(VertusHubSupport.routineNames(from: data)) { _, new in new }
+                guard !self.ended else { return }
+                if error == nil, let status = (response as? HTTPURLResponse)?.statusCode, (200..<300).contains(status) {
+                    self.routineNames.merge(VertusHubSupport.routineNames(from: data)) { _, new in new }
+                }
+                self.unnamedRoutines.subtract(self.routineNames.keys)
+                if self.askAgainForNames, let next = self.unnamedRoutines.first {
+                    self.nameRoutine(next)
+                }
+                // Whatever the answer, the waiting messages go: a routine
+                // still unnamed reads as the plain line.
+                let waiting = self.awaitingNames
+                self.awaitingNames = []
+                for message in waiting {
+                    if self.askingRoutineNames, let routine = message.routine, self.routineNames[routine] == nil,
+                       self.unnamedRoutines.contains(routine) {
+                        self.awaitingNames.append(message)
+                    } else {
+                        self.emit(.proactive(message.text, routine: message.routine.flatMap { self.routineNames[$0] }))
+                    }
+                }
             }
         }.resume()
     }
