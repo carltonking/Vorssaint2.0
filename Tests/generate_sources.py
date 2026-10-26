@@ -1272,6 +1272,8 @@ def main():
           # The press handler the initializer installs, run on demand.
           + declaration(notch, "    private init() {").replace("    private init()", "    func installHotkey()", 1)
           + declaration(notch, "    func toggleFromShortcut()") + toggle[0]
+          + "var pageBeforeVertus: NotchModule?\n"
+          + declaration(notch, "    private var regularPage:")
           + declaration(notch, "    private func syncShortcut()").replace("private func", "func", 1)
               .replace("NotchSupport.holdsShortcut()", "NotchSupport.holdsShortcut(in: ReviewDefaults.current)")
           + "}\n}\n")

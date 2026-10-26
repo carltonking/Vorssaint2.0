@@ -1191,7 +1191,25 @@ final class NotchService: ObservableObject {
     func toggleFromShortcut() {
         guard acceptsUserInteraction else { return }
         if captureControls != nil { expandCaptureControls(); return }
-        if expanded { collapseFromShortcut() } else { open() }
+        // VERTUS has its own shortcut, so the island's shortcut means "the
+        // regular island": from the VERTUS page it switches over instead of
+        // closing, and it never reopens onto VERTUS.
+        let onVertus = selected == .hermesChat && selectedMetric == nil
+            && !showingAppPanel && !showingSections && !showingCommandBar
+        if expanded {
+            if onVertus { open(regularPage) } else { collapseFromShortcut() }
+        } else if reopeningDestination.module == .hermesChat {
+            open(regularPage)
+        } else {
+            open()
+        }
+    }
+
+    /// The page the island showed before VERTUS took it, else its first page.
+    private var pageBeforeVertus: NotchModule?
+    private var regularPage: NotchModule {
+        if let page = pageBeforeVertus, page != .hermesChat, modules.contains(page) { return page }
+        return modules.first { $0 != .hermesChat } ?? .controls
     }
 
     /// While only a shortcut may open or close the island, a shortcut (or the
@@ -1940,6 +1958,8 @@ final class NotchService: ObservableObject {
     func showHermesChat(toggle: Bool = false) {
         if toggle, expanded, selected == .hermesChat, selectedMetric == nil,
            !showingAppPanel, !showingSections, !showingCommandBar { collapseFromShortcut(); return }
+        let current = expanded ? selected : reopeningDestination.module
+        if current != .hermesChat { pageBeforeVertus = current }
         open(.hermesChat)
     }
 
