@@ -131,7 +131,8 @@ enum ScratchpadFocusedShortcut {
             return shift ? .findPrevious : .findNext
         case _ where shift:
             return nil
-        case "t":
+        // Command-N is Obsidian's new note; Command-T, a new tab, here the same.
+        case "t", "n":
             return canCreatePad ? .createPad : nil
         case "w":
             return canClosePad ? .closeSelectedPad : .hidePad
@@ -558,6 +559,16 @@ extension ScratchpadSupport {
             return inlineEdit(wrap: wrap, in: ns, selection: safe)
         }
         return linePrefixEdit(mark: mark, in: ns, selection: safe)
+    }
+
+    /// A pair of markers the toolbar has no button for (`==`, `%%`, `$`),
+    /// toggled the way the buttons toggle theirs.
+    static func toggleWrap(_ marker: String, in text: String, selection: NSRange) -> ScratchpadMarkEdit {
+        let ns = text as NSString
+        let location = min(max(selection.location, 0), ns.length)
+        let length = min(max(selection.length, 0), ns.length - location)
+        let safe = trimmingSpace(from: NSRange(location: location, length: length), in: ns)
+        return inlineEdit(wrap: marker, in: ns, selection: safe)
     }
 
     private static func trimmingSpace(from selection: NSRange, in ns: NSString) -> NSRange {

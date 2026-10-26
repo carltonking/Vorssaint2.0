@@ -109,7 +109,8 @@ struct NotchControlsView: View {
         case .commandBar:
             NotchActionTile(symbol: item.symbol, title: item.title(l10n)) { service.perform { CommandBarService.shared.show() } }
         case .scratchpad:
-            NotchActionTile(symbol: item.symbol, title: item.title(l10n), action: service.openScratchpad)
+            NotchActionTile(symbol: item.symbol, title: item.title(l10n), usesObsidianMark: true,
+                            action: service.openScratchpad)
         case .timer: NotchTimerTile(service: service)
         case .calendar: NotchCalendarTile(service: service)
         case .volume, .brightness, .keyboardLight, .music: EmptyView()
@@ -420,12 +421,14 @@ struct NotchActionTile: View {
     var compactTitle: String?
     var active = false
     var accent: NotchTileAccent = .selection
+    /// The Obsidian tile shows the app's own mark rather than a symbol.
+    var usesObsidianMark = false
     let action: () -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     var body: some View {
         Button(action: action) {
             VStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 17, weight: .medium))
+                glyph
                     .foregroundStyle(active ? accent.glyph : .white.opacity(0.85))
                     .contentTransition(.symbolEffect(.replace))
                     .frame(width: 40, height: 40)
@@ -446,6 +449,14 @@ struct NotchActionTile: View {
         .accessibilityValue(reading ?? "")
         .accessibilityAddTraits(active ? .isSelected : [])
         .help(title)
+    }
+
+    @ViewBuilder private var glyph: some View {
+        if usesObsidianMark {
+            ObsidianMark(width: 18)
+        } else {
+            Image(systemName: symbol).font(.system(size: 17, weight: .medium))
+        }
     }
 
     @ViewBuilder private var label: some View {

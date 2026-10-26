@@ -27,6 +27,19 @@ struct ScratchpadLiveElement: Equatable {
         case codeBlock
         case thematicBreak
         case frontmatter
+        /// `$inline$` or a `$$display$$` block, drawn typeset over `replaced`.
+        case math(tex: String, display: Bool)
+        /// `![[image.png]]` or `![](image.png)`, drawn as the image.
+        case embed(target: String)
+        /// `%%hidden from reading%%`.
+        case comment
+        /// The `[!note]` line of a callout.
+        case callout(type: String)
+        /// A `| table | row |`, set in a fixed width so its columns line up
+        /// while the caret is in it.
+        case table
+        /// A whole table, header and delimiter row included, drawn as a grid.
+        case tableBlock(rows: [[String]])
     }
 
     var kind: Kind
@@ -42,6 +55,9 @@ struct ScratchpadLiveElement: Equatable {
     /// keeps its width and stays drawn with the caret just after it, where
     /// the item's text starts, as in Obsidian.
     var revealsAtEdges = true
+    /// The one character an image stands on while the element is formatted:
+    /// it takes the image's size and the rest of `range` is hidden.
+    var replaced: NSRange?
 }
 
 enum ScratchpadLiveMarkdown {
@@ -67,9 +83,12 @@ enum ScratchpadLiveMarkdown {
 
     /// The characters laid out as nothing for this selection.
     static func hiddenCharacters(in elements: [ScratchpadLiveElement],
-                                 selections: [NSRange]) -> IndexSet {
+                                 selections: [NSRange],
+                                 isReady: (ScratchpadLiveElement) -> Bool = { _ in true }) -> IndexSet {
         var hidden = IndexSet()
-        for element in elements where !element.hidden.isEmpty && !isRevealed(element, by: selections) {
+        // An image not drawn yet leaves its source showing rather than a gap.
+        for element in elements where !element.hidden.isEmpty && !isRevealed(element, by: selections)
+            && (element.replaced == nil || isReady(element)) {
             for range in element.hidden where range.length > 0 {
                 hidden.insert(integersIn: range.location..<NSMaxRange(range))
             }
@@ -87,6 +106,12 @@ enum ScratchpadLiveMarkdown {
     /// Tab then types a tab as anywhere else.
     static func listIndentEdit(in text: String, selection: NSRange, outdent: Bool)
         -> (range: NSRange, replacement: String, selection: NSRange)? {
+        lineIndentEdit(in: text, selection: selection, outdent: outdent, requiresList: true)
+    }
+
+    /// Command-] and Command-[ indent any line, list item or not.
+    static func lineIndentEdit(in text: String, selection: NSRange, outdent: Bool, requiresList: Bool)
+        -> (range: NSRange, replacement: String, selection: NSRange)? {
         let ns = text as NSString
         guard NSMaxRange(selection) <= ns.length else { return nil }
         let block = ns.lineRange(for: selection)
@@ -95,7 +120,7 @@ enum ScratchpadLiveMarkdown {
             lines.append(range)
         }
         if lines.isEmpty { lines = [NSRange(location: block.location, length: 0)] }
-        guard lines.allSatisfy({ listItem.firstMatch(in: text, options: [.anchored], range: $0) != nil })
+        guard !requiresList || lines.allSatisfy({ listItem.firstMatch(in: text, options: [.anchored], range: $0) != nil })
         else { return nil }
 
         let replacement = NSMutableString(string: ns.substring(with: block))
@@ -174,10 +199,97 @@ enum ScratchpadLiveMarkdown {
                 index = end + 1
                 continue
             }
+            if let table = tableBlock(ns, lines: lines, at: index) {
+                elements.append(table.element)
+                // Each row still parses, so a row being edited keeps its marks.
+                for row in index...table.end { parseLine(ns, line: lines[row], into: &elements) }
+                index = table.end + 1
+                continue
+            }
+            if let block = mathBlock(ns, lines: lines, at: index) {
+                elements.append(block.element)
+                index = block.end + 1
+                continue
+            }
             parseLine(ns, line: line, into: &elements)
             index += 1
         }
         return elements
+    }
+
+    private static let tableDelimiter = regex(#"^[ \t]*\|?[ \t]*:?-{1,}:?[ \t]*(?:\|[ \t]*:?-{1,}:?[ \t]*)*\|?[ \t]*$"#)
+
+    /// A table: a `|` row, a `|---|` delimiter row under it, then every
+    /// `|` row after them.
+    private static func tableBlock(_ ns: NSString, lines: [NSRange], at index: Int)
+        -> (element: ScratchpadLiveElement, end: Int)? {
+        func isRow(_ line: NSRange) -> Bool {
+            ns.substring(with: line).trimmingCharacters(in: .whitespaces).hasPrefix("|")
+        }
+        guard index + 1 < lines.count, isRow(lines[index]),
+              tableDelimiter.firstMatch(in: ns as String, options: [.anchored], range: lines[index + 1]) != nil,
+              ns.substring(with: lines[index + 1]).contains("|") else { return nil }
+        var end = index + 1
+        while end + 1 < lines.count, isRow(lines[end + 1]) { end += 1 }
+        let rows = ([index] + Array((index + 2)...max(index + 2, end)).filter { $0 <= end })
+            .map { tableCells(ns.substring(with: lines[$0])) }
+        let range = NSRange(location: lines[index].location, length: NSMaxRange(lines[end]) - lines[index].location)
+        let element = ScratchpadLiveElement(
+            kind: .tableBlock(rows: rows), range: range, content: range,
+            hidden: [NSRange(location: range.location + 1, length: range.length - 1)],
+            reveal: range, replaced: NSRange(location: range.location, length: 1))
+        return (element, end)
+    }
+
+    /// A row's cells, without its outer pipes; `\|` stays in its cell.
+    static func tableCells(_ row: String) -> [String] {
+        var cells: [String] = []
+        var current = ""
+        var escaped = false
+        for character in row.trimmingCharacters(in: .whitespaces) {
+            if escaped {
+                current.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "|" {
+                cells.append(current)
+                current = ""
+            } else {
+                current.append(character)
+            }
+        }
+        cells.append(current)
+        if cells.first?.trimmingCharacters(in: .whitespaces).isEmpty == true { cells.removeFirst() }
+        if cells.last?.trimmingCharacters(in: .whitespaces).isEmpty == true { cells.removeLast() }
+        return cells.map { $0.trimmingCharacters(in: .whitespaces) }
+    }
+
+    /// A `$$` block: from a line that opens with `$$` to the line that ends
+    /// with it, or the one line when it does both. Unclosed, it stays text.
+    private static func mathBlock(_ ns: NSString, lines: [NSRange], at index: Int)
+        -> (element: ScratchpadLiveElement, end: Int)? {
+        let first = ns.substring(with: lines[index]).trimmingCharacters(in: .whitespaces)
+        guard first.hasPrefix("$$") else { return nil }
+        var end = index
+        if !(first.count >= 4 && first.hasSuffix("$$")) {
+            guard let close = lines[(index + 1)...].firstIndex(where: {
+                ns.substring(with: $0).trimmingCharacters(in: .whitespaces).hasSuffix("$$")
+            }) else { return nil }
+            end = close
+        }
+        let range = NSRange(location: lines[index].location, length: NSMaxRange(lines[end]) - lines[index].location)
+        let source = ns.substring(with: range).trimmingCharacters(in: .whitespacesAndNewlines)
+        let tex = String(source.dropFirst(2).dropLast(2)).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !tex.isEmpty, range.length > 1 else { return nil }
+        let open = ns.range(of: "$$", options: [], range: range)
+        let close = ns.range(of: "$$", options: .backwards, range: range)
+        let inner = NSRange(location: NSMaxRange(open), length: max(0, close.location - NSMaxRange(open)))
+        let element = ScratchpadLiveElement(
+            kind: .math(tex: tex, display: true), range: range, content: inner,
+            hidden: [NSRange(location: range.location + 1, length: range.length - 1)],
+            reveal: range, replaced: NSRange(location: range.location, length: 1))
+        return (element, end)
     }
 
     private static func codeFence(in line: String) -> (character: Character, length: Int, info: String)? {
@@ -200,6 +312,7 @@ enum ScratchpadLiveMarkdown {
     private static let quoteMarker = regex(#"^[ \t]{0,3}>[ \t]?"#)
     private static let task = regex(#"^([ \t]*)([-*+])([ \t]+)(\[([ xX])\])(?=[ \t]|$)"#)
     private static let bullet = regex(#"^([ \t]*)([-*+])([ \t]+)"#)
+    private static let calloutMarker = regex(#"^\[!([A-Za-z][\w-]*)\][+-]?[ \t]*"#)
 
     private static func parseLine(_ ns: NSString, line: NSRange, into elements: inout [ScratchpadLiveElement]) {
         var rest = line
@@ -224,6 +337,17 @@ enum ScratchpadLiveMarkdown {
         if !bars.isEmpty {
             elements.append(ScratchpadLiveElement(kind: .quote, range: line, content: rest,
                                                   drawn: bars, reveal: line))
+            if let callout = match(calloutMarker) {
+                let type = ns.substring(with: callout.range(at: 1)).lowercased()
+                let title = NSRange(location: NSMaxRange(callout.range), length: NSMaxRange(rest) - NSMaxRange(callout.range))
+                elements.append(ScratchpadLiveElement(kind: .callout(type: type), range: rest, content: title,
+                                                      hidden: [callout.range], reveal: line))
+                rest = title
+            }
+        }
+
+        if ns.substring(with: rest).trimmingCharacters(in: .whitespaces).hasPrefix("|") {
+            elements.append(ScratchpadLiveElement(kind: .table, range: rest, content: rest, reveal: rest))
         }
 
         if let headingMatch = match(heading) {
@@ -274,6 +398,11 @@ enum ScratchpadLiveMarkdown {
     private static let highlight = regex(#"(==)(?=\S)(.+?)(?<=\S)=="#)
     private static let starItalic = regex(#"(?<![*\w])(\*)(?=[^\s*])(.+?)(?<=[^\s*])\*(?!\*)"#)
     private static let underscoreItalic = regex(#"(?<![_\w])(_)(?=[^\s_])(.+?)(?<=[^\s_])_(?![_\w])"#)
+    private static let displayMath = regex(#"\$\$(?=\S)([^$\n]+?)(?<=\S)\$\$"#)
+    private static let inlineMath = regex(#"(?<![$\\])\$(?=[^\s$])([^$\n]+?)(?<=[^\s$\\])\$(?![$\d])"#)
+    private static let comment = regex(#"%%(.+?)%%"#)
+    private static let bareURL = regex(#"(?<![\w(<\[/\x{1}])https?://[^\s<>()\[\]\x{1}]*[^\s<>()\[\].,;:!?'"\x{1}]"#)
+    static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "webp", "heic", "tiff", "bmp", "svg"]
     private static let tag = regex(#"(?<![\w#&/\x{1}])#(?=[\p{L}\p{N}_/-]*[\p{L}_/-])[\p{L}\p{N}_/-]+"#)
 
     private static func parseInline(_ ns: NSString, in range: NSRange,
@@ -292,6 +421,12 @@ enum ScratchpadLiveMarkdown {
         // An escaped character is plain text to every pass after this one.
         for match in matches(escape) { claim(match.range) }
 
+        for match in matches(comment) {
+            elements.append(ScratchpadLiveElement(kind: .comment, range: shifted(match.range),
+                                                  content: shifted(match.range), reveal: shifted(match.range)))
+            claim(match.range)
+        }
+
         for match in matches(codeSpan) {
             let open = match.range(at: 1)
             let close = NSRange(location: NSMaxRange(match.range) - open.length, length: open.length)
@@ -302,8 +437,27 @@ enum ScratchpadLiveMarkdown {
             claim(match.range)
         }
 
+        // Math before every mark: `$a_b * c$` is TeX, not italics.
+        for (expression, display) in [(displayMath, true), (inlineMath, false)] {
+            for match in matches(expression) {
+                let tex = working.substring(with: match.range(at: 1))
+                let whole = shifted(match.range)
+                elements.append(ScratchpadLiveElement(
+                    kind: .math(tex: tex, display: display), range: whole, content: shifted(match.range(at: 1)),
+                    hidden: [NSRange(location: whole.location + 1, length: whole.length - 1)],
+                    reveal: whole, replaced: NSRange(location: whole.location, length: 1)))
+                claim(match.range)
+            }
+        }
+
         for match in matches(wikilink) {
             let target = (working.substring(with: match.range(at: 2)) as String).trimmingCharacters(in: .whitespaces)
+            if working.substring(with: match.range(at: 1)).hasPrefix("!"), isImage(target) {
+                let whole = shifted(match.range)
+                elements.append(embed(target, whole))
+                claim(match.range)
+                continue
+            }
             let alias = match.range(at: 3)
             var hidden = [shifted(match.range(at: 1)), shifted(match.range(at: 4))]
             var content = shifted(match.range(at: 2))
@@ -319,6 +473,11 @@ enum ScratchpadLiveMarkdown {
 
         for match in matches(link) {
             let url = working.substring(with: match.range(at: 4))
+            if working.substring(with: match.range(at: 1)).hasPrefix("!"), isImage(url) {
+                elements.append(embed(url.removingPercentEncoding ?? url, shifted(match.range)))
+                claim(match.range)
+                continue
+            }
             elements.append(ScratchpadLiveElement(kind: .link(url: url), range: shifted(match.range),
                                                   content: shifted(match.range(at: 2)),
                                                   hidden: [shifted(match.range(at: 1)), shifted(match.range(at: 3))],
@@ -349,9 +508,27 @@ enum ScratchpadLiveMarkdown {
             }
         }
 
+        for match in matches(bareURL) {
+            let url = working.substring(with: match.range)
+            elements.append(ScratchpadLiveElement(kind: .link(url: url), range: shifted(match.range),
+                                                  content: shifted(match.range), reveal: shifted(match.range)))
+            claim(match.range)
+        }
+
         for match in matches(tag) {
             elements.append(ScratchpadLiveElement(kind: .tag, range: shifted(match.range),
                                                   content: shifted(match.range), reveal: shifted(match.range)))
         }
+    }
+
+    static func isImage(_ target: String) -> Bool {
+        let name = target.split(separator: "|").first.map(String.init) ?? target
+        return imageExtensions.contains((name as NSString).pathExtension.lowercased())
+    }
+
+    private static func embed(_ target: String, _ whole: NSRange) -> ScratchpadLiveElement {
+        ScratchpadLiveElement(kind: .embed(target: target), range: whole, content: whole,
+                              hidden: [NSRange(location: whole.location + 1, length: whole.length - 1)],
+                              reveal: whole, replaced: NSRange(location: whole.location, length: 1))
     }
 }

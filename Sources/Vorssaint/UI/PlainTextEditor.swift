@@ -74,6 +74,10 @@ struct PlainTextEditor: NSViewRepresentable {
     var onToggleTask: ((Int) -> Void)?
     /// A formatted `[[wikilink]]` was clicked; called with the note it names.
     var onOpenWikilink: ((String) -> Void)?
+    /// The vault's note names, offered as `[[` is typed.
+    var wikilinkNames: (() -> [String])?
+    /// Where an `![[image]]` embed's file is.
+    var resolveEmbed: ((String) -> URL?)?
 
     init(text: Binding<String>,
          fontSize: CGFloat = PlainTextEditor.defaultFontSize,
@@ -88,6 +92,8 @@ struct PlainTextEditor: NSViewRepresentable {
          livePreview: Bool = false,
          onToggleTask: ((Int) -> Void)? = nil,
          onOpenWikilink: ((String) -> Void)? = nil,
+         wikilinkNames: (() -> [String])? = nil,
+         resolveEmbed: ((String) -> URL?)? = nil,
          onCreate: ((NSTextView) -> Void)? = nil) {
         self._text = text
         self.fontSize = fontSize
@@ -102,6 +108,8 @@ struct PlainTextEditor: NSViewRepresentable {
         self.livePreview = livePreview
         self.onToggleTask = onToggleTask
         self.onOpenWikilink = onOpenWikilink
+        self.wikilinkNames = wikilinkNames
+        self.resolveEmbed = resolveEmbed
         self.onCreate = onCreate
     }
 
@@ -151,6 +159,8 @@ struct PlainTextEditor: NSViewRepresentable {
         if let live = textView as? ScratchpadLiveTextView {
             live.onToggleTask = onToggleTask
             live.onOpenWikilink = onOpenWikilink
+            live.wikilinkNames = wikilinkNames
+            live.styler?.resolveEmbed = resolveEmbed
         }
         context.coordinator.installLineMoveMonitor(for: textView)
         onCreate?(textView)
@@ -168,6 +178,8 @@ struct PlainTextEditor: NSViewRepresentable {
         if let live = textView as? ScratchpadLiveTextView {
             live.onToggleTask = onToggleTask
             live.onOpenWikilink = onOpenWikilink
+            live.wikilinkNames = wikilinkNames
+            live.styler?.resolveEmbed = resolveEmbed
         }
         // Hidden, not disabled: it keeps its text and undo history, and can
         // still be cleared through, but a hidden view has no cursor rects.
@@ -221,6 +233,13 @@ struct PlainTextEditor: NSViewRepresentable {
         func installLineMoveMonitor(for textView: NSTextView) {
             self.textView = textView
             lineMoveMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+                if let self, self.livePreview, let textView = self.textView,
+                   event.window === textView.window,
+                   textView.window?.firstResponder === textView,
+                   !textView.hasMarkedText(),
+                   self.handleObsidianKey(event, in: textView) {
+                    return nil
+                }
                 if let self, let textView = self.textView,
                    event.window === textView.window,
                    textView.window?.firstResponder === textView,
@@ -231,6 +250,11 @@ struct PlainTextEditor: NSViewRepresentable {
                     // the list on and Shift-Return is the plain line.
                     if flags == (self.livePreview ? [] : .shift), self.continuesLists {
                         self.continueList(in: textView)
+                        return nil
+                    }
+                    // Command-Return on a link follows it, as in Obsidian.
+                    if flags == .command, self.livePreview,
+                       (textView as? ScratchpadLiveTextView)?.followLinkAtCaret() == true {
                         return nil
                     }
                     if flags == .command, let onCommandReturn = self.onCommandReturn {
@@ -262,6 +286,52 @@ struct PlainTextEditor: NSViewRepresentable {
                 }
                 return self.moveLine(direction, in: textView) ? nil : event
             }
+        }
+
+        /// Obsidian's editing keys, bracket pairs and typed-over selections.
+        /// True when the key was used.
+        private func handleObsidianKey(_ event: NSEvent, in textView: NSTextView) -> Bool {
+            guard textView.isEditable else { return false }
+            let flags = event.modifierFlags.intersection([.command, .option, .shift, .control])
+            if let command = ScratchpadObsidianEditing.command(
+                charactersIgnoringModifiers: event.charactersIgnoringModifiers,
+                command: flags.contains(.command), shift: flags.contains(.shift),
+                option: flags.contains(.option), control: flags.contains(.control)) {
+                if command == .toggleReading {
+                    guard let onCommandReturn else { return false }
+                    onCommandReturn()
+                    return true
+                }
+                guard let edit = ScratchpadObsidianEditing.edit(for: command, in: textView.string,
+                                                                 selection: textView.selectedRange()) else { return true }
+                apply(edit, in: textView, separateUndo: true)
+                return true
+            }
+            guard !flags.contains(.command), !flags.contains(.control), !flags.contains(.option) else { return false }
+            if Int(event.keyCode) == kVK_Delete, flags.isEmpty,
+               let edit = ScratchpadObsidianEditing.deletePairEdit(in: textView.string, selection: textView.selectedRange()) {
+                apply(edit, in: textView, separateUndo: false)
+                return true
+            }
+            if let typed = event.characters, (typed as NSString).length == 1,
+               let edit = ScratchpadObsidianEditing.typingEdit(typed, in: textView.string,
+                                                               selection: textView.selectedRange()) {
+                apply(edit, in: textView, separateUndo: false)
+                return true
+            }
+            return false
+        }
+
+        private func apply(_ edit: ScratchpadMarkEdit, in textView: NSTextView, separateUndo: Bool) {
+            let current = (textView.string as NSString).substring(with: edit.range)
+            if current != edit.replacement {
+                if separateUndo { textView.breakUndoCoalescing() }
+                guard textView.shouldChangeText(in: edit.range, replacementString: edit.replacement) else { return }
+                textView.textStorage?.replaceCharacters(in: edit.range, with: edit.replacement)
+                textView.didChangeText()
+            }
+            textView.setSelectedRange(edit.selection)
+            textView.scrollRangeToVisible(edit.selection)
         }
 
         /// Shift-Return: the next list item, or a plain line.
@@ -356,6 +426,15 @@ struct PlainTextEditor: NSViewRepresentable {
             let current = textView.string
             if text.wrappedValue != current { text.wrappedValue = current }
             publishSelection(of: textView, in: current)
+            (textView as? ScratchpadLiveTextView)?.offerWikilinkCompletions()
+        }
+
+        func textView(_ textView: NSTextView, completions words: [String],
+                      forPartialWordRange charRange: NSRange,
+                      indexOfSelectedItem index: UnsafeMutablePointer<Int>?) -> [String] {
+            guard let live = textView as? ScratchpadLiveTextView, let names = live.wikilinkCompletions() else { return words }
+            index?.pointee = names.isEmpty ? -1 : 0
+            return names
         }
 
         /// Publishes the caret only. Never writes the text binding: a caret

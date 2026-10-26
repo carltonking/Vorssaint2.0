@@ -24,10 +24,95 @@ final class ScratchpadLiveStyler: NSObject, NSTextStorageDelegate, NSLayoutManag
     /// Characters whose hidden state changed during an edit, waiting for the
     /// layout manager to finish it before their glyphs can be invalidated.
     private var pendingInvalidation = IndexSet()
+    /// A typeset formula or embedded image, standing on one character.
+    struct Picture {
+        let image: NSImage
+        let size: NSSize
+        /// On a line of its own, centred for math, rather than in the text.
+        let block: Bool
+        let centered: Bool
+    }
+    /// The pictures showing now, by the character each stands on.
+    private(set) var pictures: [Int: Picture] = [:]
+    /// Where `![[name.png]]` points; the pad answers from its vault.
+    var resolveEmbed: ((String) -> URL?)?
+    private var renderObserver: NSObjectProtocol?
 
     init(baseSize: CGFloat, textColor: NSColor) {
         self.baseSize = baseSize
         self.textColor = textColor
+        super.init()
+        renderObserver = NotificationCenter.default.addObserver(
+            forName: ScratchpadMathRenderer.didRender, object: nil, queue: .main) { [weak self] _ in
+            MainActor.assumeIsolated { self?.restyleAll() }
+        }
+    }
+
+    deinit {
+        if let renderObserver { NotificationCenter.default.removeObserver(renderObserver) }
+    }
+
+    /// The colour formulas are typeset in, fixed for the editor's appearance.
+    private var resolvedTextColor: NSColor {
+        var resolved = textColor
+        (textView?.effectiveAppearance ?? NSApp.effectiveAppearance).performAsCurrentDrawingAppearance {
+            resolved = NSColor(cgColor: textColor.cgColor) ?? textColor
+        }
+        return resolved
+    }
+
+    /// The picture an element draws as, or nil while it is not ready (or is
+    /// not a picture), which leaves its source showing.
+    @MainActor
+    func picture(for element: ScratchpadLiveElement) -> Picture? {
+        let renderer = ScratchpadMathRenderer.shared
+        switch element.kind {
+        case .math(let tex, let display):
+            guard let image = renderer.image(tex: tex, display: display, fontSize: baseSize,
+                                             color: resolvedTextColor) else { return nil }
+            return Picture(image: image, size: image.size, block: display && isAlone(element), centered: true)
+        case .tableBlock(let rows):
+            guard let image = renderer.image(table: rows, fontSize: baseSize, color: resolvedTextColor) else { return nil }
+            return Picture(image: image, size: image.size, block: true, centered: false)
+        case .embed(let target):
+            let url: URL? = target.hasPrefix("http://") || target.hasPrefix("https://")
+                ? URL(string: target) : resolveEmbed?(target)
+            guard let url, let image = renderer.image(embed: url) else { return nil }
+            let width = max(40, (textView?.textContainer?.size.width ?? 300) - 16)
+            let scale = min(1, width / max(image.size.width, 1), 360 / max(image.size.height, 1))
+            return Picture(image: image,
+                           size: NSSize(width: (image.size.width * scale).rounded(),
+                                        height: (image.size.height * scale).rounded()),
+                           block: isAlone(element), centered: false)
+        default:
+            return nil
+        }
+    }
+
+    /// Whether nothing but space shares the element's lines.
+    private func isAlone(_ element: ScratchpadLiveElement) -> Bool {
+        guard let text = textView?.string as NSString?, NSMaxRange(element.range) <= text.length else { return false }
+        let lines = text.lineRange(for: element.range)
+        let before = text.substring(with: NSRange(location: lines.location, length: element.range.location - lines.location))
+        let after = text.substring(with: NSRange(location: NSMaxRange(element.range),
+                                                 length: NSMaxRange(lines) - NSMaxRange(element.range)))
+        return (before + after).trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Hidden characters and pictures for `selections`, together, so the two
+    /// can never disagree about which elements are formatted.
+    @MainActor
+    private func formatting(for selections: [NSRange]) -> (hidden: IndexSet, pictures: [Int: Picture]) {
+        var ready: [Int: Picture] = [:]
+        for element in elements {
+            guard let replaced = element.replaced, !ScratchpadLiveMarkdown.isRevealed(element, by: selections),
+                  let picture = picture(for: element) else { continue }
+            ready[replaced.location] = picture
+        }
+        let hidden = ScratchpadLiveMarkdown.hiddenCharacters(in: elements, selections: selections) { element in
+            element.replaced.map { ready[$0.location] != nil } ?? true
+        }
+        return (hidden, ready)
     }
 
     var baseFont: NSFont { .systemFont(ofSize: baseSize) }
@@ -83,7 +168,9 @@ final class ScratchpadLiveStyler: NSObject, NSTextStorageDelegate, NSLayoutManag
             if NSMaxRange(selection) < editedRange.location { return selection }
             return NSRange(location: NSMaxRange(editedRange), length: 0)
         }
-        hidden = ScratchpadLiveMarkdown.hiddenCharacters(in: elements, selections: selections)
+        let formatted = MainActor.assumeIsolated { formatting(for: selections) }
+        hidden = formatted.hidden
+        pictures = formatted.pictures
         pendingInvalidation.shift(startingAt: oldEnd, by: delta)
         pendingInvalidation.formUnion(previous.symmetricDifference(hidden))
         revealed = []
@@ -107,6 +194,7 @@ final class ScratchpadLiveStyler: NSObject, NSTextStorageDelegate, NSLayoutManag
         storage.endEditing()
         textView?.typingAttributes = baseAttributes
         hidden = IndexSet()
+        pictures = [:]
         revealed = []
         if let layout = textView?.layoutManager {
             layout.invalidateGlyphs(forCharacterRange: NSRange(location: 0, length: storage.length),
@@ -170,9 +258,28 @@ final class ScratchpadLiveStyler: NSObject, NSTextStorageDelegate, NSLayoutManag
         case .frontmatter:
             add(.font, mono, element.range)
             add(.foregroundColor, mutedColor, element.range)
+        case .math:
+            add(.font, mono, element.range)
+        case .embed:
+            break
+        case .comment:
+            add(.foregroundColor, Self.faded(textColor, 0.35), element.range)
+        case .callout:
+            addTrait(.boldFontMask, element.content)
+            add(.foregroundColor, NSColor.controlAccentColor, element.content)
+        case .table:
+            add(.font, mono, element.range)
+        case .tableBlock:
+            break
         }
-        // What shows while the caret is in it is syntax, not text.
-        for range in element.hidden + element.drawn { add(.foregroundColor, mutedColor, range) }
+        // What shows while the caret is in it is syntax, not text. A
+        // picture's source is all hidden, so only its markers are dimmed.
+        if element.replaced != nil {
+            add(.foregroundColor, mutedColor, element.range)
+            if element.content != element.range { add(.foregroundColor, Self.faded(textColor, 0.85), element.content) }
+        } else {
+            for range in element.hidden + element.drawn { add(.foregroundColor, mutedColor, range) }
+        }
     }
 
     // MARK: - Revealing
@@ -188,8 +295,12 @@ final class ScratchpadLiveStyler: NSObject, NSTextStorageDelegate, NSLayoutManag
         }
         let selections = textView.selectedRanges.map(\.rangeValue)
         let nowRevealed = elements.map { ScratchpadLiveMarkdown.isRevealed($0, by: selections) }
-        let nowHidden = ScratchpadLiveMarkdown.hiddenCharacters(in: elements, selections: selections)
+        let formatted = MainActor.assumeIsolated { formatting(for: selections) }
+        let nowHidden = formatted.hidden
         var changed = pendingInvalidation.union(nowHidden.symmetricDifference(hidden))
+        // A picture that came or went changes its line's glyphs too.
+        for index in Set(formatted.pictures.keys).symmetricDifference(pictures.keys) { changed.insert(index) }
+        pictures = formatted.pictures
         pendingInvalidation = IndexSet()
         hidden = nowHidden
         changed.remove(integersIn: storage.length..<Int.max)
@@ -229,19 +340,68 @@ final class ScratchpadLiveStyler: NSObject, NSTextStorageDelegate, NSLayoutManag
                        characterIndexes: UnsafePointer<Int>,
                        font: NSFont,
                        forGlyphRange glyphRange: NSRange) -> Int {
-        guard !hidden.isEmpty, glyphRange.length > 0 else { return 0 }
+        guard !hidden.isEmpty || !pictures.isEmpty, glyphRange.length > 0 else { return 0 }
         let first = characterIndexes[0]
         let last = characterIndexes[glyphRange.length - 1]
-        guard first <= last, hidden.intersects(integersIn: first..<(last + 1)) else { return 0 }
+        guard first <= last, hidden.intersects(integersIn: first..<(last + 1))
+                || pictures.keys.contains(where: { $0 >= first && $0 <= last }) else { return 0 }
         var adjusted = Array(UnsafeBufferPointer(start: properties, count: glyphRange.length))
-        for index in 0..<glyphRange.length where hidden.contains(characterIndexes[index]) {
-            adjusted[index] = .null
+        for index in 0..<glyphRange.length {
+            let character = characterIndexes[index]
+            // A picture's character becomes a control glyph, which the
+            // layout gives the picture's size below.
+            if pictures[character] != nil {
+                adjusted[index] = .controlCharacter
+            } else if hidden.contains(character) {
+                adjusted[index] = .null
+            }
         }
         adjusted.withUnsafeBufferPointer { buffer in
             layoutManager.setGlyphs(glyphs, properties: buffer.baseAddress!, characterIndexes: characterIndexes,
                                     font: font, forGlyphRange: glyphRange)
         }
         return glyphRange.length
+    }
+
+    /// A line holding a picture grows to its height; the layout leaves a
+    /// control glyph's box out of the line's height.
+    func layoutManager(_ layoutManager: NSLayoutManager,
+                       shouldSetLineFragmentRect lineFragmentRect: UnsafeMutablePointer<NSRect>,
+                       lineFragmentUsedRect: UnsafeMutablePointer<NSRect>,
+                       baselineOffset: UnsafeMutablePointer<CGFloat>,
+                       in textContainer: NSTextContainer,
+                       forGlyphRange glyphRange: NSRange) -> Bool {
+        guard !pictures.isEmpty else { return false }
+        let characters = layoutManager.characterRange(forGlyphRange: glyphRange, actualGlyphRange: nil)
+        let needed = pictures.filter { NSLocationInRange($0.key, characters) }
+            .map { $0.value.size.height + ($0.value.block ? 10 : 4) }.max() ?? 0
+        let extra = needed - lineFragmentRect.pointee.height
+        guard extra > 0 else { return false }
+        lineFragmentRect.pointee.size.height += extra
+        lineFragmentUsedRect.pointee.size.height += extra
+        baselineOffset.pointee += extra / 2
+        return true
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager,
+                       shouldUse action: NSLayoutManager.ControlCharacterAction,
+                       forControlCharacterAt charIndex: Int) -> NSLayoutManager.ControlCharacterAction {
+        pictures[charIndex] != nil ? .whitespace : action
+    }
+
+    func layoutManager(_ layoutManager: NSLayoutManager,
+                       boundingBoxForControlGlyphAt glyphIndex: Int,
+                       for textContainer: NSTextContainer,
+                       proposedLineFragment proposedRect: NSRect,
+                       glyphPosition: NSPoint,
+                       characterIndex charIndex: Int) -> NSRect {
+        guard let picture = pictures[charIndex] else { return .zero }
+        // A block takes the rest of its line, so nothing sits beside it and
+        // it can be centred in it.
+        let width = picture.block
+            ? max(picture.size.width, proposedRect.width - glyphPosition.x - 2 * textContainer.lineFragmentPadding)
+            : picture.size.width + 2
+        return NSRect(x: glyphPosition.x, y: 0, width: width, height: picture.size.height + (picture.block ? 8 : 2))
     }
 }
 
@@ -273,13 +433,44 @@ final class ScratchpadLiveLayoutManager: NSLayoutManager {
 
     override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: NSPoint) {
         super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin)
-        guard let styler, styler.revealed.count == styler.elements.count else { return }
+        guard let styler else { return }
         let shown = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        for (character, picture) in styler.pictures where NSLocationInRange(character, shown) {
+            drawPicture(picture, at: character, origin: origin)
+        }
+        guard styler.revealed.count == styler.elements.count else { return }
         for (element, isRevealed) in zip(styler.elements, styler.revealed) where !isRevealed {
             for range in element.drawn where NSIntersectionRange(range, shown).length > 0 {
                 draw(element.kind, over: range, at: origin, styler: styler)
             }
         }
+    }
+
+    private func drawPicture(_ picture: ScratchpadLiveStyler.Picture, at character: Int, origin: NSPoint) {
+        guard let storage = textStorage, character < storage.length else { return }
+        let glyph = glyphIndexForCharacter(at: character)
+        guard glyph < numberOfGlyphs else { return }
+        let line = lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let position = location(forGlyphAt: glyph)
+        let size = picture.size
+        var rect: NSRect
+        if picture.block {
+            let used = lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+            let x = picture.centered ? used.minX + (max(used.width, size.width) - size.width) / 2
+                                     : line.minX + position.x
+            rect = NSRect(x: x, y: line.minY + (line.height - size.height) / 2, width: size.width, height: size.height)
+        } else {
+            // Centred on the middle of a lowercase letter, as text in the
+            // line around a formula is.
+            let font = (storage.attribute(.font, at: character, effectiveRange: nil) as? NSFont)
+                ?? NSFont.systemFont(ofSize: NSFont.systemFontSize)
+            let middle = line.minY + position.y - font.xHeight / 2
+            let y = min(max(line.minY, middle - size.height / 2), line.maxY - size.height)
+            rect = NSRect(x: line.minX + position.x + 1, y: y, width: size.width, height: size.height)
+        }
+        rect = rect.offsetBy(dx: origin.x, dy: origin.y)
+        picture.image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1,
+                           respectFlipped: true, hints: nil)
     }
 
     /// The rectangle `glyphs` cover on their line, measured from the glyphs'
@@ -356,7 +547,11 @@ final class ScratchpadLiveTextView: NSTextView {
     private var liveStorage: NSTextStorage?
     var onToggleTask: ((Int) -> Void)?
     var onOpenWikilink: ((String) -> Void)?
+    var wikilinkNames: (() -> [String])?
     private var pointerArea: NSTrackingArea?
+    /// True while AppKit's completion list is putting a name in, so the text
+    /// change that makes does not ask for the list again.
+    private var insertingCompletion = false
 
     /// A scroll view laid out as `NSTextView.scrollableTextView()` lays one
     /// out, around the live editor.
@@ -404,6 +599,69 @@ final class ScratchpadLiveTextView: NSTextView {
         super.didChangeText()
         typingAttributes = styler?.baseAttributes ?? typingAttributes
         styler?.refresh()
+    }
+
+    // MARK: - Wikilinks
+
+    /// The note names for the `[[` the caret is in, or nil outside one.
+    func wikilinkCompletions() -> [String]? {
+        let caret = selectedRange()
+        guard caret.length == 0, let names = wikilinkNames,
+              let query = ScratchpadObsidianEditing.wikilinkQuery(in: string, caret: caret.location) else { return nil }
+        return ScratchpadObsidianEditing.wikilinkCompletions(for: query.query, among: names())
+    }
+
+    /// Typing inside `[[` opens the list of notes, as Obsidian's suggester does.
+    func offerWikilinkCompletions() {
+        guard !insertingCompletion, window?.firstResponder === self, !hasMarkedText(),
+              let names = wikilinkCompletions(), !names.isEmpty else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self, self.wikilinkCompletions()?.isEmpty == false else { return }
+            self.complete(nil)
+        }
+    }
+
+    override var rangeForUserCompletion: NSRange {
+        let caret = selectedRange()
+        if caret.length == 0,
+           let query = ScratchpadObsidianEditing.wikilinkQuery(in: string, caret: caret.location) {
+            return query.range
+        }
+        return super.rangeForUserCompletion
+    }
+
+    override func insertCompletion(_ word: String, forPartialWordRange charRange: NSRange,
+                                   movement: Int, isFinal flag: Bool) {
+        insertingCompletion = true
+        super.insertCompletion(word, forPartialWordRange: charRange, movement: movement, isFinal: flag)
+        insertingCompletion = false
+        // Chosen with Return or Tab: the caret steps out past the `]]`.
+        guard flag, movement == NSReturnTextMovement || movement == NSTabTextMovement else { return }
+        let text = string as NSString
+        let caret = selectedRange().location
+        if caret + 2 <= text.length, text.substring(with: NSRange(location: caret, length: 2)) == "]]" {
+            setSelectedRange(NSRange(location: caret + 2, length: 0))
+        }
+    }
+
+    /// Command-Return on a link or wikilink opens it; false when the caret
+    /// is on neither.
+    func followLinkAtCaret() -> Bool {
+        guard let styler else { return false }
+        let caret = selectedRange().location
+        for element in styler.elements where element.range.location <= caret && caret <= NSMaxRange(element.range) {
+            switch element.kind {
+            case .link(let address):
+                if let url = URL(string: address), url.scheme != nil { NSWorkspace.shared.open(url) }
+                return true
+            case .wikilink(let name):
+                onOpenWikilink?(name)
+                return true
+            default:
+                continue
+            }
+        }
+        return false
     }
 
     // MARK: - Clicks

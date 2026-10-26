@@ -3755,7 +3755,9 @@ final class NotchService: ObservableObject {
             if event.type == .keyDown, event.window === self.panel, self.showingCommandBar { return event }
             if event.type == .keyDown, event.window === self.panel, self.captureControls == nil {
                 let modifiers = event.modifierFlags.intersection([.command, .control, .option, .shift])
-                if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "k" {
+                // Command-K inserts a link in the Obsidian editor, as in Obsidian.
+                if modifiers == .command, event.charactersIgnoringModifiers?.lowercased() == "k",
+                   !(self.selected == .scratchpad && self.panel?.firstResponder is NSTextView) {
                     self.toggleSections()
                     return nil
                 }

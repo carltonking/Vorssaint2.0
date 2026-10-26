@@ -34,6 +34,27 @@ struct NotchScratchpadView: View {
 
     private var selectedPad: ScratchpadPad? { pad.pads.first { $0.id == pad.selectedPadID } }
 
+    /// The live editor, apart from `body` so the compiler checks it alone.
+    private var textEditor: some View {
+        PlainTextEditor(text: $pad.text, fontSize: textSize,
+                        textColor: .white,
+                        textContainerInset: Self.editorInset,
+                        usesFindBar: true,
+                        completesTaskBoxes: true,
+                        continuesLists: true,
+                        onCommandReturn: { pad.togglePreview() },
+                        isActive: !pad.isPreviewing,
+                        livePreview: true,
+                        onToggleTask: { pad.toggleTask(box: $0, through: editor.view) },
+                        onOpenWikilink: { pad.openLinkedNote($0) },
+                        wikilinkNames: { pad.wikilinkNoteNames() },
+                        resolveEmbed: { pad.embedURL(for: $0) }) { view in
+            view.insertionPointColor = .white
+            editor.view = view
+            DispatchQueue.main.async { focusEditor() }
+        }
+    }
+
     var body: some View {
         Group {
             if loadFailed, pad.vaultPath == nil {
@@ -53,21 +74,7 @@ struct NotchScratchpadView: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                     }
                     ZStack(alignment: .topLeading) {
-                        PlainTextEditor(text: $pad.text, fontSize: textSize,
-                                        textColor: .white,
-                                        textContainerInset: Self.editorInset,
-                                        usesFindBar: true,
-                                        completesTaskBoxes: true,
-                                        continuesLists: true,
-                                        onCommandReturn: { pad.togglePreview() },
-                                        isActive: !pad.isPreviewing,
-                                        livePreview: true,
-                                        onToggleTask: { pad.toggleTask(box: $0, through: editor.view) },
-                                        onOpenWikilink: { pad.openLinkedNote($0) }) { view in
-                            view.insertionPointColor = .white
-                            editor.view = view
-                            DispatchQueue.main.async { focusEditor() }
-                        }
+                        textEditor
                         .opacity(pad.isPreviewing ? 0 : 1)
                         .allowsHitTesting(!pad.isPreviewing)
                         .accessibilityHidden(pad.isPreviewing)

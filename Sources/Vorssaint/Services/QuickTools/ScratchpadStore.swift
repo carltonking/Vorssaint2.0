@@ -182,6 +182,31 @@ enum ScratchpadVaultSupport {
         return nil
     }
 
+    /// The file an `![[image.png]]` embed shows: a path from the vault root,
+    /// or a file of that name anywhere in the vault. Never outside it.
+    static func attachmentURL(forEmbed target: String, in vault: URL) -> URL? {
+        let name = (target.split(separator: "|").first.map(String.init) ?? target)
+            .trimmingCharacters(in: .whitespaces)
+        guard !name.isEmpty, !name.hasPrefix("/"), !name.split(separator: "/").contains("..") else { return nil }
+        let manager = FileManager.default
+        let direct = vault.appendingPathComponent(name).standardizedFileURL
+        if direct.path.hasPrefix(vault.standardizedFileURL.path + "/"), manager.fileExists(atPath: direct.path) {
+            return direct
+        }
+        let file = (name as NSString).lastPathComponent
+        guard let walker = manager.enumerator(at: vault, includingPropertiesForKeys: nil,
+                                              options: [.skipsHiddenFiles, .skipsPackageDescendants]) else { return nil }
+        for case let url as URL in walker where url.lastPathComponent.caseInsensitiveCompare(file) == .orderedSame {
+            return url.standardizedFileURL
+        }
+        return nil
+    }
+
+    /// Every note's name in a tree, for `[[` completion.
+    static func noteNames(in tree: [ScratchpadVaultNode]) -> [String] {
+        tree.flatMap { node in node.children.map(noteNames(in:)) ?? [node.name] }
+    }
+
     /// A note name that does not replace an existing file, preferring the
     /// plain name and numbering after it.
     static func uniqueFileURL(named name: String,

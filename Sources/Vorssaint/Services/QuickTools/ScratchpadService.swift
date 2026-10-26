@@ -508,6 +508,28 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         return ScratchpadVaultSupport.noteTree(in: vaultURL)
     }
 
+    private var noteNamesCache: (date: Date, names: [String])?
+    private var embedCache: [String: (date: Date, url: URL?)] = [:]
+
+    /// The vault's note names for `[[` completion, read at most every few
+    /// seconds rather than on every keystroke.
+    func wikilinkNoteNames() -> [String] {
+        if let noteNamesCache, Date().timeIntervalSince(noteNamesCache.date) < 10 { return noteNamesCache.names }
+        let names = ScratchpadVaultSupport.noteNames(in: vaultNoteTree())
+        noteNamesCache = (Date(), names)
+        return names
+    }
+
+    /// The file an `![[image]]` embed shows. The editor asks on every caret
+    /// move, so answers, misses included, are kept for a while.
+    func embedURL(for target: String) -> URL? {
+        if let cached = embedCache[target], Date().timeIntervalSince(cached.date) < 15 { return cached.url }
+        guard let vaultURL else { return nil }
+        let url = ScratchpadVaultSupport.attachmentURL(forEmbed: target, in: vaultURL)
+        embedCache[target] = (Date(), url)
+        return url
+    }
+
     /// Opens a note picked from the vault's list as a tab, or selects its tab
     /// when it is already open.
     func openVaultNote(_ path: String) {

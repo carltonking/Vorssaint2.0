@@ -75,6 +75,8 @@ enum NotchCompactTests {
         func renamePad(_ id: UUID, to name: String) {}
         func selectPad(_ id: UUID) {}
         func openLinkedNote(_ target: String) {}
+        func wikilinkNoteNames() -> [String] { [] }
+        func embedURL(for target: String) -> URL? { nil }
         func vaultNoteTree() -> [ScratchpadVaultNode] { [] }
         func openVaultNote(_ path: String) {}
         func copyAll() {}

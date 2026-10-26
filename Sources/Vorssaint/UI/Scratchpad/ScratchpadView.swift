@@ -298,6 +298,8 @@ struct ScratchpadView: View {
                             livePreview: true,
                             onToggleTask: { service.toggleTask(box: $0) },
                             onOpenWikilink: { service.openLinkedNote($0) },
+                            wikilinkNames: { service.wikilinkNoteNames() },
+                            resolveEmbed: { service.embedURL(for: $0) },
                             onCreate: { ScratchpadService.shared.registerTextView($0) })
                 .opacity(service.isPreviewing ? 0 : 1)
                 .allowsHitTesting(!service.isPreviewing)
