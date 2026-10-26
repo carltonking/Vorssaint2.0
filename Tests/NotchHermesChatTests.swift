@@ -21,6 +21,7 @@ enum NotchHermesChatTests {
         bubbleContracts(suite)
         hubContracts(suite)
         approvalContracts(suite)
+        historyContracts(suite)
         silenceContracts(suite)
         routineReplyContracts(suite)
         reachOutContracts(suite)
@@ -884,5 +885,34 @@ enum NotchHermesChatTests {
         for spoken in ["NOTHING_TO_REPORT, sir.", "Nothing to report", "Mail: NOTHING_TO_REPORT", ""] {
             suite.expect(!VertusRoutineReplies.isSilence(spoken), "\(spoken.debugDescription) is a real message")
         }
+    }
+
+    /// The conversation outlives the page being switched off and the app
+    /// quitting: it is saved, read back, and capped like the live transcript.
+    private static func historyContracts(_ suite: TestSuite) {
+        let date = Date(timeIntervalSince1970: 1_800_000_000)
+        let lines = [NotchHermesChatMessage.Role.person, .hermes, .tool, .note, .proactive].map {
+            NotchHermesChatMessage(role: $0, text: "line \($0)", date: date, source: $0 == .proactive ? "check-in" : nil)
+        }
+        let back = NotchHermesChatHistory.encode(lines).map(NotchHermesChatHistory.decode) ?? []
+        suite.expect(back == lines, "every kind of line comes back as it was saved")
+
+        let many = (0..<205).map { NotchHermesChatMessage(role: .person, text: "m\($0)", date: date) }
+        let kept = NotchHermesChatHistory.encode(many).map(NotchHermesChatHistory.decode) ?? []
+        suite.expect(kept.count == HermesACPSupport.maximumMessages && kept.last?.text == "m204",
+                     "a long history keeps its newest lines")
+
+        suite.expect(NotchHermesChatHistory.decode(Data("not json".utf8)).isEmpty,
+                     "a damaged file reads as no history")
+        let good = NotchHermesChatHistory.encode([lines[0]]).flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        let withUnknown = good.replacingOccurrences(of: "\"messages\":[", with:
+            "\"messages\":[{\"id\":\"\(UUID().uuidString)\",\"role\":\"future\",\"text\":\"x\",\"date\":\"2027-01-01T00:00:00Z\"},")
+        suite.expect(NotchHermesChatHistory.decode(Data(withUnknown.utf8)) == [lines[0]],
+                     "a line a newer build wrote is skipped and the rest still load")
+
+        let early = NotchHermesChatMessage(role: .person, text: "typed before the file was read", date: date)
+        let merged = NotchHermesChatHistory.restored(saved: Array(lines.prefix(2)), current: [lines[1], early])
+        suite.expect(merged == [lines[0], lines[1], early],
+                     "saved lines come first, a line already saved is not repeated, new ones follow")
     }
 }

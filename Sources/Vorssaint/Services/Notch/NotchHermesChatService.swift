@@ -38,7 +38,33 @@ final class NotchHermesChatService: ObservableObject {
     }
 
     @Published private(set) var state: State = .off
-    @Published private(set) var messages: [NotchHermesChatMessage] = []
+    @Published private(set) var messages: [NotchHermesChatMessage] = [] {
+        // Saved once the earlier history is back, so an early write can never
+        // replace the file before it was read.
+        didSet { if historyRestored, messages != oldValue { historyStore.save(messages) } }
+    }
+    private let historyStore = NotchHermesChatHistoryStore()
+    private var historyRestored = false
+    private var historyRequested = false
+
+    /// Brings back the conversation from earlier launches, once.
+    private func restoreHistory() {
+        guard !historyRequested else { return }
+        historyRequested = true
+        historyStore.load { [weak self] saved in
+            guard let self else { return }
+            let merged = NotchHermesChatHistory.restored(saved: saved, current: self.messages)
+            self.historyRestored = true
+            if merged != self.messages { self.messages = merged }
+        }
+    }
+
+    /// Before the app quits: the last few lines must not wait on the debounce.
+    func flushHistory() {
+        guard historyRestored else { return }
+        historyStore.save(messages)
+        historyStore.flush()
+    }
     /// The reply being written, kept apart from the transcript until its turn
     /// ends so a tool line can land in the order it happened.
     @Published private(set) var reply = ""
@@ -107,6 +133,8 @@ final class NotchHermesChatService: ObservableObject {
     /// Settings. Called by the feature runtime and by the settings controls.
     func syncWithPreferences() {
         syncShortcut()
+        if AppFeature.notchHermesChat.isAvailable,
+           UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatEnabled) { restoreHistory() }
         guard AppFeature.notchHermesChat.isAvailable,
               UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatEnabled),
               AppFeature.notch.isAvailable
@@ -127,8 +155,8 @@ final class NotchHermesChatService: ObservableObject {
         }
     }
 
-    /// Ends the conversation and forgets it. The transcript is dropped too:
-    /// an agent switched off should leave nothing running or held in memory.
+    /// Ends the connection. The transcript stays (saved on disk): only the
+    /// user's Clear Conversation empties it.
     func stop() {
         client?.end()
         client = nil
@@ -142,7 +170,7 @@ final class NotchHermesChatService: ObservableObject {
         // Nothing keeps listening or reading for a conversation that ended.
         NotchHermesVoiceService.existing?.reset()
         if state != .off { state = .off }
-        if !messages.isEmpty { messages = [] }
+        // The transcript stays: only Clear Conversation empties it.
         if !reply.isEmpty { reply = "" }
         if !thinking.isEmpty { thinking = "" }
         if working { working = false }
@@ -269,7 +297,11 @@ final class NotchHermesChatService: ObservableObject {
     /// Empties the transcript without ending the session: Hermes keeps the
     /// conversation on its side, as clearing a terminal would not.
     func clear() {
+        // Cleared before the saved history came back: that history goes too.
+        historyRestored = true
+        historyRequested = true
         messages = []
+        historyStore.save([])
         reply = ""
         thinking = ""
         heldMessage = nil

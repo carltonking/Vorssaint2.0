@@ -282,8 +282,8 @@ struct HermesACPFrame {
 }
 
 /// One line of the island's conversation with Hermes.
-struct NotchHermesChatMessage: Identifiable, Equatable {
-    enum Role: Equatable {
+struct NotchHermesChatMessage: Identifiable, Equatable, Codable {
+    enum Role: String, Equatable, Codable {
         case person, hermes
         /// A tool the agent ran, named without its output.
         case tool
@@ -415,5 +415,49 @@ enum HermesACPSupport {
             return line
         }
         return lines.joined(separator: "\n")
+    }
+}
+
+/// The conversation as saved between launches: only the user's Clear empties
+/// it, so it survives quitting, updates, and the page being switched off.
+enum NotchHermesChatHistory {
+    private struct File: Codable {
+        var version = 1
+        var messages: [Line]
+    }
+
+    /// One message that may not decode (a role a newer build added): skipped
+    /// alone rather than costing the whole history.
+    private struct Line: Codable {
+        let message: NotchHermesChatMessage?
+        init(_ message: NotchHermesChatMessage) { self.message = message }
+        init(from decoder: Decoder) throws {
+            message = try? NotchHermesChatMessage(from: decoder)
+        }
+        func encode(to encoder: Encoder) throws { try message?.encode(to: encoder) }
+    }
+
+    static func encode(_ messages: [NotchHermesChatMessage]) -> Data? {
+        let file = File(messages: HermesACPSupport.trimmed(messages).map(Line.init))
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return try? encoder.encode(file)
+    }
+
+    /// The saved conversation, newest kept within the cap; anything unreadable
+    /// reads as no history.
+    static func decode(_ data: Data) -> [NotchHermesChatMessage] {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let file = try? decoder.decode(File.self, from: data), file.version == 1 else { return [] }
+        return HermesACPSupport.trimmed(file.messages.compactMap(\.message))
+    }
+
+    /// Saved lines first, then any that arrived before the file was read,
+    /// without repeats, within the cap.
+    static func restored(saved: [NotchHermesChatMessage],
+                         current: [NotchHermesChatMessage]) -> [NotchHermesChatMessage] {
+        let known = Set(saved.map(\.id))
+        return HermesACPSupport.trimmed(saved + current.filter { !known.contains($0.id) })
     }
 }
