@@ -1191,7 +1191,19 @@ final class NotchService: ObservableObject {
     func toggleFromShortcut() {
         guard acceptsUserInteraction else { return }
         if captureControls != nil { expandCaptureControls(); return }
-        toggle()
+        if expanded { collapseFromShortcut() } else { open() }
+    }
+
+    /// While only a shortcut may open or close the island, a shortcut (or the
+    /// system taking the island off screen) sets this for the one close
+    /// `collapse()` lets through; anything else the user does (a click away,
+    /// Escape, the pointer leaving) leaves the island open.
+    private var forcingCollapse = false
+
+    private func collapseFromShortcut() {
+        forcingCollapse = true
+        defer { forcingCollapse = false }
+        collapse()
     }
 
     /// Registered whenever the island runs, including while it is away, so the
@@ -1362,6 +1374,7 @@ final class NotchService: ObservableObject {
     /// unless the user turned off opening the visible activity, in which case
     /// the reopening choice decides here too.
     func openActivity(_ module: NotchModule) {
+        guard !NotchSupport.opensOnlyFromShortcut() else { return }
         let opensActivity = UserDefaults.standard.object(forKey: DefaultsKey.notchOpensActivity) as? Bool ?? true
         if opensActivity { open(module) } else { open() }
     }
@@ -1443,6 +1456,7 @@ final class NotchService: ObservableObject {
     }
 
     func collapse() {
+        if expanded, NotchSupport.opensOnlyFromShortcut(), !forcingCollapse { return }
         guard captureControls == nil, !heldDrag else { return }
         let closeCapture = detachCaptureIfClosingOnCollapse()
         let closesCommandBar = showingCommandBar
@@ -1511,7 +1525,7 @@ final class NotchService: ObservableObject {
     @discardableResult
     func showClipboard(toggle: Bool = false) -> Bool {
         guard acceptsUserInteraction, NotchSupport.routesClipboardWindow() else { return false }
-        if toggle, expanded, selected == .clipboard, !showingAppPanel, !showingSections, !showingCommandBar { collapse() }
+        if toggle, expanded, selected == .clipboard, !showingAppPanel, !showingSections, !showingCommandBar { collapseFromShortcut() }
         else { open(.clipboard) }
         return true
     }
@@ -1532,7 +1546,8 @@ final class NotchService: ObservableObject {
         // The activity picker replaces that opening and keeps its hover response.
         let opensOnHover = UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover)
             && UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) && !showsCompactActivityPicker
-        let emphasize = inside && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking && !dragPlaceholder
+        // Opening only from a shortcut, the island gives no hint under the pointer.
+        let emphasize = inside && !NotchSupport.opensOnlyFromShortcut() && !hiddenInFullscreen && !hiddenUntilHover && !expanded && !peeking && !dragPlaceholder
             && notice == nil && captureControls == nil && !opensOnHover
             && !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         if hoverEmphasized != emphasize || showedPicker != showsCompactActivityPicker || unnamesMusic {
@@ -1569,6 +1584,7 @@ final class NotchService: ObservableObject {
         if inside {
             if holdsNotification, let id = notice?.notificationID { holdNotification(id); return }
             guard !hoverState.suppressed, (notice == nil || hiddenUntilHover), !expanded, !peeking, !dragPlaceholder,
+                  !NotchSupport.opensOnlyFromShortcut(),
                   UserDefaults.standard.bool(forKey: DefaultsKey.notchOpenOnHover) else { return }
             if !hiddenInFullscreen, compactActivity != nil, compactActivityGeometry.compactActivityWingWidth > 0,
                !UserDefaults.standard.bool(forKey: DefaultsKey.notchHoverExpands) { return }
@@ -1888,14 +1904,17 @@ final class NotchService: ObservableObject {
         // Without a regular window to take the keyboard back, resignPanelKey()
         // leaves AppKit keeping the island as its key window while the panel's
         // own flag is clear. AppKit's record still means the island has the keyboard.
+        // Kept open whatever else happens, the island closes on the second
+        // press even after another app took the keyboard.
         if toggle, expanded, selected == .scratchpad, !showingAppPanel, !showingSections, !showingCommandBar,
-           selectedMetric == nil, let panel, panel.isKeyWindow || NSApp.keyWindow === panel { collapse() }
+           selectedMetric == nil, let panel,
+           panel.isKeyWindow || NSApp.keyWindow === panel || NotchSupport.opensOnlyFromShortcut() { collapseFromShortcut() }
         else { open(.scratchpad) }
         return true
     }
 
     func openAppPanel(toggle: Bool = false) {
-        if toggle, expanded, showingAppPanel, !showingSections, !showingCommandBar { collapse(); return }
+        if toggle, expanded, showingAppPanel, !showingSections, !showingCommandBar { collapseFromShortcut(); return }
         MenuPanelFocus.shared.showNormalPanel()
         open(.controls, appPanel: true)
         // The toggling route is the menu bar's. Opened from there, the panel
@@ -1905,21 +1924,21 @@ final class NotchService: ObservableObject {
 
     func openQuickPanel(toggle: Bool = false) -> Bool {
         guard NotchSupport.routesQuickPanel(), acceptsUserInteraction else { return false }
-        if toggle, expanded, selected == .tools, !showingSections, !showingCommandBar { collapse() }
+        if toggle, expanded, selected == .tools, !showingSections, !showingCommandBar { collapseFromShortcut() }
         else { open(.tools) }
         return true
     }
 
     func openShelf(toggle: Bool = false) -> Bool {
         guard NotchSupport.routesShelf(), acceptsUserInteraction else { return false }
-        if toggle, expanded, selected == .files, !showingSections, !showingCommandBar { collapse() }
+        if toggle, expanded, selected == .files, !showingSections, !showingCommandBar { collapseFromShortcut() }
         else { open(.files) }
         return true
     }
 
     func showMetric(_ metric: MetricDetailKind, toggle: Bool = false) {
         guard metricIsAvailable(metric) else { return }
-        if toggle, expanded, selectedMetric == metric, !showingSections, !showingCommandBar { collapse(); return }
+        if toggle, expanded, selectedMetric == metric, !showingSections, !showingCommandBar { collapseFromShortcut(); return }
         open(.system, metric: metric)
         // A metric opened from its menu bar item closes on Escape, like the popover.
         if toggle { detailHasPage = false }
@@ -2233,7 +2252,8 @@ final class NotchService: ObservableObject {
     }
 
     func beginFileDrop(_ pasteboard: NSPasteboard) {
-        guard canAcceptFileDrop else { return }
+        // A drag reaching a closed island that only a shortcut opens leaves it closed.
+        guard canAcceptFileDrop, expanded || !NotchSupport.opensOnlyFromShortcut() else { return }
         choosingFileDropDestination = NotchFileToolsService.shared.mediaDropContent(for: pasteboard) != nil
         targetsMediaDrop = false
         open(.files, takeFocus: false)
@@ -2322,10 +2342,11 @@ final class NotchService: ObservableObject {
             NotchNotificationService.shared.open(id) { [weak self] result in
                 guard let self else { return }
                 if self.notice?.notificationID == id { self.dismissNotice() }
-                if result == .unavailable || result == .uncertain { self.open(.notifications) }
+                if result == .unavailable || result == .uncertain, !NotchSupport.opensOnlyFromShortcut() { self.open(.notifications) }
             }
             return
         }
+        guard !NotchSupport.opensOnlyFromShortcut() else { dismissNotice(); return }
         open(selectedNotice.event == .download ? .downloads : selectedNotice.event == .timer ? .timer
              : selectedNotice.event == .accessory ? .system : selectedNotice.event == .systemNotification ? .notifications
              : selectedNotice.event == .clipboard ? .clipboard : selectedNotice.event == .agents ? .agents
@@ -2468,7 +2489,10 @@ final class NotchService: ObservableObject {
     func presentCapture(id: UUID, content: AnyView, actions: AnyView? = nil, height: CGFloat,
                         takeFocus: Bool, closeOnCollapse: Bool, fallback: @escaping () -> Void,
                         close: @escaping () -> Void, hover: @escaping (Bool) -> Void) -> Bool {
-        guard acceptsSystemFeedback, NotchSupport.routes(.capture) else { return false }
+        // A closed island that only a shortcut opens leaves the capture to its
+        // floating preview.
+        guard acceptsSystemFeedback, NotchSupport.routes(.capture),
+              expanded || !NotchSupport.opensOnlyFromShortcut() else { return false }
         let keepOpen = expanded && pinned
         captureID = id
         captureContentHeight = height
@@ -2501,7 +2525,7 @@ final class NotchService: ObservableObject {
         guard captureID == id else { return }
         clearCapture()
         if expanded, selected == .captures, !showingSections, !showingCommandBar {
-            if pinned { refreshPresentation() }
+            if pinned || NotchSupport.opensOnlyFromShortcut() { refreshPresentation() }
             else { collapse() }
         }
     }
@@ -2710,6 +2734,8 @@ final class NotchService: ObservableObject {
             }, activate: { [weak self] in
                 guard let self else { return }
                 if self.captureControls != nil { self.expandCaptureControls() }
+                // Only a shortcut opens or closes it; a click on the island does neither.
+                else if NotchSupport.opensOnlyFromShortcut() { return }
                 // The capsule's button covers its music bars too, which play or pause there.
                 else if self.geometry.floats, self.musicStripShowsControl { self.toggleMusicStripSong() }
                 else if !self.expanded, self.compactActivity == .calendar {
@@ -3139,7 +3165,7 @@ final class NotchService: ObservableObject {
     /// A click on a copy brings the island to its display, open, closing it
     /// on the display it was open on.
     private func bringIsland(to id: CGDirectDisplayID) {
-        guard running, !suspended, showsOnAllDisplays, id != displayID else { return }
+        guard running, !suspended, showsOnAllDisplays, id != displayID, !NotchSupport.opensOnlyFromShortcut() else { return }
         if expanded || peeking { collapse() }
         windowHost?.whenSettled { [weak self] in
             guard let self, self.running, !self.suspended, self.canFollowPointer,
@@ -3205,6 +3231,7 @@ final class NotchService: ObservableObject {
             guard let pressed = pressedArea,
                   NotchSupport.screenEdgeArea(pressed, contains: point) || NotchSupport.screenEdgeArea(area, contains: point),
                   windowHost?.containsDestination(point) == true else { return }
+            guard !NotchSupport.opensOnlyFromShortcut() else { return }
             if compactActivity == .calendar { openCountdownEvent() } else { open() }
         case .leftMouseDragged:
             // A press at the screen's edge reports a drag at once, often without
@@ -3472,7 +3499,11 @@ final class NotchService: ObservableObject {
             endDeparture()
             notice = nil
             noticeExpanded = false
+            // Full screen takes the island off screen; that close is the
+            // system's, not a click the shortcut-only preference refuses.
+            forcingCollapse = true
             collapse()
+            forcingCollapse = false
         }
         // Space changes do not run a full preference sync. Restore volume
         // and brightness key routing when the island becomes eligible for
@@ -3817,6 +3848,7 @@ final class NotchService: ObservableObject {
                                           precise: event.hasPreciseScrollingDeltas,
                                           hasPhase: !event.phase.isEmpty,
                                           allowVertical: vertical, allowHorizontal: horizontal, expanded: expanded) else { return false }
+        if NotchSupport.opensOnlyFromShortcut(), action == .open || action == .close { return false }
         switch action {
         case .open: open()
         case .close: collapse()
@@ -4996,6 +5028,13 @@ extension NotchService {
     /// The bar closed itself, and the island closes with it.
     func dismissCommandBar() {
         guard showingCommandBar else { return }
+        // Kept open, the island goes back to its page rather than holding an
+        // empty bar.
+        if NotchSupport.opensOnlyFromShortcut() {
+            mutatePresentation(transitionContent: .replace) { showingCommandBar = false }
+            commandBarDidClose()
+            return
+        }
         collapse()
     }
 

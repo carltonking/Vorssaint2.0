@@ -904,7 +904,7 @@ def main():
     notch = "Sources/Vorssaint/Services/Notch/NotchService.swift"
     write("NotchFullscreen.swift", "import CoreGraphics\nimport Foundation\nextension NotchFullscreenTests {\n"
           + declaration("Sources/Vorssaint/Services/Switcher/SpaceWindowBridge.swift", "    struct Topology {")
-          + "final class Service: State {\n"
+          + "final class Service: State {\nvar forcingCollapse = false\n"
           + declaration(notch, "    var acceptsUserInteraction: Bool {")
           + declaration(notch, "    var acceptsSystemFeedback: Bool {")
           + declaration(notch, "    private func updateFullscreenVisibility(").replace("private func", "func", 1)
@@ -1072,7 +1072,7 @@ def main():
     music_visibility = music_visibility.replace("AppFeature.connectedDevices.isAvailable",
                                                 "AppFeature.connectedDevices.isAvailable(in: ReviewDefaults.current)")
     write("NotchMusicVisibility.swift", "import Foundation\nextension NotchMusicVisibilityTests {\n"
-          + "final class Service: State {\nfunc resignPanelKey() { panel?.resignKey() }\n"
+          + "final class Service: State {\nfunc resignPanelKey() { panel?.resignKey() }\nvar forcingCollapse = false\n"
           + music_visibility + "}\n}\n")
     write("NotchScreenEdgeClicks.swift", "import AppKit\nextension NotchScreenEdgeClickTests {\nfinal class Service: State {\n"
           + "func open() { openings += 1; expanded = true; syncScreenEdgeClicks() }\n"
@@ -1241,6 +1241,7 @@ def main():
           + declaration(notch, "    func open(_ module:")
               .replace("NotchSupport.isEnabled()", "NotchSupport.isEnabled(in: ReviewDefaults.current)")
           + "func removeHoverExitMonitors() {}\n"
+          + "func collapseFromShortcut() { collapse() }\n"
           + declaration(notch, "    func showScratchpad(")
               .replace("NotchSupport.routesScratchpad()", "NotchSupport.routesScratchpad(in: ReviewDefaults.current)")
           + declaration(notch, "    func showClipboard(")
@@ -1288,7 +1289,7 @@ def main():
           + declaration("Sources/Vorssaint/Services/Notch/NotchFileToolsService.swift", "    func updateMediaHeight(")
           + declaration("Sources/Vorssaint/Services/Notch/NotchFileToolsService.swift", "    func hideMedia(")
           + declaration("Sources/Vorssaint/Services/Notch/NotchFileToolsService.swift", "    func showMedia(")
-          + "}\nfinal class Notch: NotchState {\n"
+          + "}\nfinal class Notch: NotchState {\nvar expanded = false\n"
           + declaration(notch, "    var canAcceptFileDrop:")
           + declaration(notch, "    func beginFileDrop(")
           + declaration(notch, "    func updateFileDrop(")

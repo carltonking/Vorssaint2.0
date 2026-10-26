@@ -902,6 +902,8 @@ enum DefaultsKey {
     static let notchOpenOnHover = "notchOpenOnHover"
     static let notchShortcutEnabled = "notchShortcutEnabled"
     static let notchShortcut = "notchShortcut"
+    /// While on with the island shortcut, only a shortcut opens or closes the island. Off by default
+    static let notchShortcutKeepsOpen = "notchShortcutKeepsOpen"
     static let notchHideInFullscreen = "notchHideInFullscreen"
     static let notchHideUntilHover = "notchHideUntilHover"
     static let notchHiddenShowsActivity = "notchHiddenShowsActivity"
@@ -1501,6 +1503,7 @@ enum Defaults {
         DefaultsKey.notchOpenOnHover: false,
         DefaultsKey.notchShortcutEnabled: false,
         DefaultsKey.notchShortcut: GlobalShortcut.notchDefault.storageValue,
+        DefaultsKey.notchShortcutKeepsOpen: false,
         DefaultsKey.notchHideInFullscreen: false,
         DefaultsKey.notchHideUntilHover: false,
         DefaultsKey.notchHiddenShowsActivity: false,

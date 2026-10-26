@@ -1840,6 +1840,13 @@ enum NotchSupport {
         isEnabled(in: defaults) && defaults.bool(forKey: DefaultsKey.notchShortcutEnabled)
     }
 
+    /// Only a shortcut opens or closes the island: no hover response, no
+    /// click, and nothing else puts an open island away. It needs the island
+    /// shortcut on, so there is always a key that can close it again.
+    static func opensOnlyFromShortcut(in defaults: UserDefaults = .standard) -> Bool {
+        holdsShortcut(in: defaults) && defaults.bool(forKey: DefaultsKey.notchShortcutKeepsOpen)
+    }
+
     static func modules(in defaults: UserDefaults = .standard) -> [NotchModule] {
         let hidden = Set((defaults.string(forKey: DefaultsKey.notchHiddenModules) ?? "")
             .split(separator: ",").map(String.init))

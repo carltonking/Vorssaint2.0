@@ -42,6 +42,7 @@ struct NotchSettings: View {
     @AppStorage(DefaultsKey.notchSilhouette) private var silhouette = NotchSilhouette.capsule.rawValue
     @AppStorage(DefaultsKey.notchOpenOnHover) private var hover = false
     @AppStorage(DefaultsKey.notchShortcutEnabled) private var shortcutEnabled = false
+    @AppStorage(DefaultsKey.notchShortcutKeepsOpen) private var shortcutKeepsOpen = false
     @AppStorage(DefaultsKey.notchHideInFullscreen) private var hideInFullscreen = false
     @AppStorage(DefaultsKey.notchHideUntilHover) private var hideUntilHover = false
     @AppStorage(DefaultsKey.notchHiddenShowsActivity) private var hiddenShowsActivity = false
@@ -667,6 +668,8 @@ struct NotchSettings: View {
                             .foregroundStyle(.orange)
                             .padding(.leading, settingsRowTextInset)
                     }
+                    switchRow("pin", editor.shortcutKeepsOpen, caption: editor.shortcutKeepsOpenHint,
+                              isOn: $shortcutKeepsOpen)
                 }
                 SettingsFeatureSwitchRow(symbol: "hand.draw", title: FeatureStrings.notchGestures(l10n.language).title,
                                          caption: gesturesEnabled ? FeatureStrings.notchGestures(l10n.language).hint : nil,

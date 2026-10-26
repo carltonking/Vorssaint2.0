@@ -1650,6 +1650,18 @@ enum NotchTests {
         suite.expect(!holds(island: false), "the island shortcut is not wanted while the island is off")
         suite.expect(!holds(installed: false), "the island shortcut is not wanted while the island is removed in the hub")
         suite.expect(!holds(shortcut: false), "turning the island shortcut off releases its key")
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.notchShortcutKeepsOpen] as? Bool == false
+                && backupKeys.contains(DefaultsKey.notchShortcutKeepsOpen),
+               "hover and clicks open and close the island unless the user asks for the shortcut alone, and the choice is backed up")
+        func onlyShortcut(keepsOpen: Bool, shortcut: Bool = true) -> Bool {
+            _ = holds(shortcut: shortcut)
+            defaults.set(keepsOpen, forKey: DefaultsKey.notchShortcutKeepsOpen)
+            return NotchSupport.opensOnlyFromShortcut(in: defaults)
+        }
+        suite.expect(onlyShortcut(keepsOpen: true), "the shortcut alone opens and closes the island when asked")
+        suite.expect(!onlyShortcut(keepsOpen: false), "the island answers hover and clicks by default")
+        suite.expect(!onlyShortcut(keepsOpen: true, shortcut: false),
+               "without its shortcut the island is never held open with no key to close it")
         // The service is a singleton holding a real Carbon hotkey, so its
         // wiring is checked in the source, like the launch hooks below.
         let service = (try? String(contentsOfFile: "Sources/Vorssaint/Services/Notch/NotchService.swift",
