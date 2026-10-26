@@ -290,6 +290,33 @@ struct DiscordMark: View {
 /// The Obsidian logo for the pad that edits Obsidian notes. It is drawn as a
 /// template so it takes the tint of the row it sits in, like the SF Symbols
 /// beside it.
+/// Instinct's wordmark, white letters on nothing, as a template image so it
+/// takes the island's colour. Falls back to the drawn serif I.
+struct InstinctWordmark: View {
+    var height: CGFloat
+
+    private static let mark: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "instinct-wordmark",
+                                        withExtension: "png",
+                                        subdirectory: "Images"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.isTemplate = true
+        return image
+    }()
+
+    var body: some View {
+        if let mark = Self.mark {
+            Image(nsImage: mark)
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(height: height)
+        } else {
+            InstinctMark().fill().frame(width: height * 0.4, height: height)
+        }
+    }
+}
+
 struct ObsidianMark: View {
     var width: CGFloat
 

@@ -448,7 +448,7 @@ struct NotchHermesChatView: View {
                 if chat.agent == .vertus {
                     VertusMark().fill(style: FillStyle(eoFill: true)).frame(width: 14, height: 16)
                 } else {
-                    InstinctMark().fill().frame(width: 6, height: 16)
+                    InstinctWordmark(height: 13)
                 }
             }
             .foregroundStyle(.white.opacity(0.9))
