@@ -1853,7 +1853,7 @@ final class NotchService: ObservableObject {
             return commandOnly && !shift && event.charactersIgnoringModifiers?.lowercased() == "t"
         }
         switch action {
-        case .createPad: pad.createPad(defaultName: FeatureStrings.scratchpad(L10n.shared.language).pageTitle)
+        case .createPad: pad.createPad(defaultName: FeatureStrings.scratchpad(L10n.shared.language).newNoteName)
         case .closeSelectedPad: scratchpadCloseSerial += 1
         case .hidePad: collapse()
         case .find: requestScratchpadFind(.showFindInterface)

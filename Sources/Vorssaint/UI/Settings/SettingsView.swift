@@ -343,7 +343,13 @@ struct SettingsView: View {
                 if !collapsedSectionIDs.contains(section.id) {
                     ForEach(section.items) { item in
                         HStack(spacing: 9) {
-                            Image(systemName: item.icon)
+                            Group {
+                                if item.id == .feature(.scratchpad) {
+                                    ObsidianMark(width: 16)
+                                } else {
+                                    Image(systemName: item.icon)
+                                }
+                            }
                                 .foregroundStyle(selectedID == item.id
                                     ? AnyShapeStyle(.primary) : AnyShapeStyle(.tint))
                                 .frame(width: 18)

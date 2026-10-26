@@ -187,7 +187,7 @@ struct NotchScratchpadView: View {
                 }
                 .help(text.openNote)
                 NotchIconButton(symbol: "plus", title: newPadTitle) {
-                    pad.createPad(defaultName: text.pageTitle)
+                    pad.createPad(defaultName: text.newNoteName)
                 }
                 .disabled(!pad.canCreatePad)
             }
@@ -230,7 +230,7 @@ struct NotchScratchpadView: View {
             items.append(.separator)
         }
         items += [
-            NotchMenuItem(title: newPadTitle, enabled: pad.canCreatePad) { pad.createPad(defaultName: text.pageTitle) },
+            NotchMenuItem(title: newPadTitle, enabled: pad.canCreatePad) { pad.createPad(defaultName: text.newNoteName) },
             NotchMenuItem(title: text.openNote, symbol: "folder", children: vaultItems()),
             NotchMenuItem(title: text.renamePad, enabled: current != nil) {
                 if let current { presentRename(current) }

@@ -107,7 +107,7 @@ struct ScratchpadView: View {
             .accessibilityLabel(text.openNote)
 
             Button {
-                service.createPad(defaultName: text.pageTitle)
+                service.createPad(defaultName: text.newNoteName)
             } label: {
                 Image(systemName: "plus")
                     .font(.system(size: 12, weight: .semibold))
