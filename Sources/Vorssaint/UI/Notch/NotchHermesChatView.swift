@@ -12,6 +12,7 @@ struct NotchHermesChatSettingsControls: View {
     @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.notchHermesChatEnabled) private var enabled = false
     @AppStorage(DefaultsKey.notchHermesChatCliPath) private var cliPath = HermesACPSupport.defaultCommand
+    @AppStorage(DefaultsKey.notchHermesChatShortcutEnabled) private var shortcutEnabled = true
     /// The command the running agent was started with. Opening this page is
     /// not a reason to restart it; editing the field is.
     @State private var appliedCommand: String?
@@ -37,7 +38,15 @@ struct NotchHermesChatSettingsControls: View {
                 Text(text.cliPathHint).font(.caption).foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            if enabled { status }
+            if enabled {
+                Toggle(L10n.shared.s.quickToolShortcutToggle, isOn: $shortcutEnabled)
+                    .onChange(of: shortcutEnabled) { _, _ in chat.syncShortcut() }
+                ShortcutPreferenceRow(role: .vertusChat, isEnabled: shortcutEnabled) { chat.syncShortcut() }
+                if shortcutEnabled, chat.shortcutRegistrationFailed {
+                    Text(L10n.shared.s.shortcutUnavailable).font(.caption).foregroundStyle(.orange)
+                }
+                status
+            }
         }
         .onAppear {
             if appliedCommand == nil { appliedCommand = cliPath }

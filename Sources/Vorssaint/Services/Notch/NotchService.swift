@@ -1936,6 +1936,13 @@ final class NotchService: ObservableObject {
         return true
     }
 
+    /// Opens the VERTUS chat page from its shortcut; a second press closes it.
+    func showHermesChat(toggle: Bool = false) {
+        if toggle, expanded, selected == .hermesChat, selectedMetric == nil,
+           !showingAppPanel, !showingSections, !showingCommandBar { collapseFromShortcut(); return }
+        open(.hermesChat)
+    }
+
     /// Opens the System page; with `toggle`, a second press closes it.
     func showSystem(toggle: Bool = false) {
         if toggle, expanded, selected == .system, selectedMetric == nil,

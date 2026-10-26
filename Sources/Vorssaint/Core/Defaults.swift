@@ -870,6 +870,8 @@ enum DefaultsKey {
     // `hermes acp` server, held by the island.
     static let notchHermesChatEnabled = "notchHermesChatEnabled"
     static let notchHermesChatCliPath = "notchHermesChatCliPath"
+    static let notchHermesChatShortcutEnabled = "notchHermesChatShortcutEnabled"
+    static let notchHermesChatShortcut = "notchHermesChatShortcut"
     /// Reads each finished VERTUS reply aloud. A taste, not a property of
     /// the Mac, so it travels with a settings backup.
     static let notchHermesChatSpeakReplies = "notchHermesChatSpeakReplies"
@@ -1504,6 +1506,8 @@ enum Defaults {
         // Off until asked for: the switch starts a local agent process.
         DefaultsKey.notchHermesChatEnabled: false,
         DefaultsKey.notchHermesChatCliPath: HermesACPSupport.defaultCommand,
+        DefaultsKey.notchHermesChatShortcutEnabled: true,
+        DefaultsKey.notchHermesChatShortcut: GlobalShortcut.vertusChatDefault.storageValue,
         // Silent until asked for: a reply read aloud in an open office is
         // a surprise nobody chose.
         DefaultsKey.notchHermesChatSpeakReplies: false,

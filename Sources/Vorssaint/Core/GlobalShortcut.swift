@@ -223,6 +223,10 @@ struct GlobalShortcut: Equatable, Hashable {
     // I for island, on the same free control-option-command layer.
     static let notchDefault = GlobalShortcut(keyCode: Int64(kVK_ANSI_I),
                                              modifiers: [.control, .option, .command])
+    // K for the agent the user talks to: opens the island on VERTUS, as the
+    // VERTUS QuickBar's ⇧⌘J opens its own panel.
+    static let vertusChatDefault = GlobalShortcut(keyCode: Int64(kVK_ANSI_K),
+                                                  modifiers: [.command, .shift])
     // L for library (S already belongs to the sound output switcher), on the
     // same free control-option-command layer.
     static let snippetLibraryDefault = GlobalShortcut(keyCode: Int64(kVK_ANSI_L),
@@ -724,6 +728,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
     case keyboardBrightnessIncrease
     case pointerNextDisplay
     case notch
+    case vertusChat
 
     var id: String { storageKey }
 
@@ -759,6 +764,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .keyboardBrightnessIncrease: return DefaultsKey.keyboardBrightnessIncreaseShortcut
         case .pointerNextDisplay: return DefaultsKey.pointerDisplayShortcut
         case .notch: return DefaultsKey.notchShortcut
+        case .vertusChat: return DefaultsKey.notchHermesChatShortcut
         }
     }
 
@@ -794,6 +800,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .keyboardBrightnessIncrease: return .keyboardBrightnessIncreaseDefault
         case .pointerNextDisplay: return .pointerNextDisplayDefault
         case .notch: return .notchDefault
+        case .vertusChat: return .vertusChatDefault
         }
     }
 
@@ -858,6 +865,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
             return FeatureStrings.brightness(L10n.shared.language).keyboardBrightnessIncrease
         case .pointerNextDisplay: return PointerDisplayStrings.localized(L10n.shared.language).title
         case .notch: return FeatureStrings.notch(L10n.shared.language).title
+        case .vertusChat: return FeatureStrings.notchHermesChat(L10n.shared.language).title
         }
     }
 
@@ -916,6 +924,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
             return [DefaultsKey.keyboardBrightnessShortcutsEnabled]
         case .pointerNextDisplay: return [DefaultsKey.pointerDisplayEnabled]
         case .notch: return [DefaultsKey.notchEnabled, DefaultsKey.notchShortcutEnabled]
+        case .vertusChat: return [DefaultsKey.notchEnabled, DefaultsKey.notchHermesChatEnabled, DefaultsKey.notchHermesChatShortcutEnabled]
         }
     }
 
@@ -948,6 +957,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .keyboardBrightnessDecrease, .keyboardBrightnessIncrease: return .brightness
         case .pointerNextDisplay: return .windowLayout
         case .notch: return .notch
+        case .vertusChat: return .notchHermesChat
         }
     }
 

@@ -77,7 +77,25 @@ final class NotchHermesChatService: ObservableObject {
     /// is not fetched back.
     private let watchCursor = VertusWatchCursor()
 
-    private init() {}
+    /// ⇧⌘K by default: opens the island on this page.
+    private let hotkey = QuickToolHotkey(id: 82)
+    @Published private(set) var shortcutRegistrationFailed = false
+
+    private init() {
+        hotkey.onPress = { NotchService.shared.showHermesChat(toggle: true) }
+    }
+
+    /// Registers the page's shortcut while the feature, its switch and the
+    /// island are on; anything else releases it.
+    func syncShortcut() {
+        let defaults = UserDefaults.standard
+        let enabled = AppFeature.notchHermesChat.isAvailable && AppFeature.notch.isAvailable
+            && defaults.bool(forKey: DefaultsKey.notchHermesChatEnabled)
+            && defaults.bool(forKey: DefaultsKey.notchHermesChatShortcutEnabled)
+        let shortcut = GlobalShortcut.saved(for: DefaultsKey.notchHermesChatShortcut, fallback: .vertusChatDefault)
+        shortcutRegistrationFailed = !hotkey.sync(enabled: enabled, shortcut: shortcut,
+                                                  storageKey: DefaultsKey.notchHermesChatShortcut)
+    }
 
     private var text: NotchHermesChatStrings {
         FeatureStrings.notchHermesChat(L10n.shared.language)
@@ -88,6 +106,7 @@ final class NotchHermesChatService: ObservableObject {
     /// Follows the feature's availability, the switch, and the command in
     /// Settings. Called by the feature runtime and by the settings controls.
     func syncWithPreferences() {
+        syncShortcut()
         guard AppFeature.notchHermesChat.isAvailable,
               UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatEnabled),
               AppFeature.notch.isAvailable
