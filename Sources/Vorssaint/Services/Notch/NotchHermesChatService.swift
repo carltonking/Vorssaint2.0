@@ -120,6 +120,8 @@ final class NotchHermesChatService: ObservableObject {
         // Switched off is a fresh start: turning it back on does not replay
         // everything VERTUS said in between.
         watchCursor.reset()
+        // Nothing keeps listening or reading for a conversation that ended.
+        NotchHermesVoiceService.existing?.reset()
         if state != .off { state = .off }
         if !messages.isEmpty { messages = [] }
         if !reply.isEmpty { reply = "" }
@@ -194,6 +196,8 @@ final class NotchHermesChatService: ObservableObject {
         guard AppFeature.notchHermesChat.isAvailable,
               UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatEnabled)
         else { return }
+        // A new message talks over the old reply: the reading stops.
+        NotchHermesVoiceService.existing?.stopSpeaking()
         // Typing into a conversation that failed is a try of its own.
         if client == nil { connect() }
         // Nothing to send to, and the field the words came from is already
@@ -235,6 +239,12 @@ final class NotchHermesChatService: ObservableObject {
         guard approvals.contains(where: { $0.id == approval.id }), !answering.contains(approval.id) else { return }
         answering.insert(approval.id)
         client?.answer(approval.id, choice: choice)
+    }
+
+    /// A line of the island's own in the conversation, such as why the
+    /// microphone cannot listen.
+    func addNote(_ line: String) {
+        append(NotchHermesChatMessage(role: .note, text: line))
     }
 
     /// Empties the transcript without ending the session: Hermes keeps the
@@ -352,6 +362,12 @@ final class NotchHermesChatService: ObservableObject {
     private func append(_ message: NotchHermesChatMessage) {
         messages.append(message)
         messages = HermesACPSupport.trimmed(messages)
+        // Every finished reply and unasked message passes through here, so
+        // this is the one place that reads them aloud when the speaker is on.
+        if NotchHermesVoiceSupport.shouldSpeak(
+            message.role, enabled: UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatSpeakReplies)) {
+            NotchHermesVoiceService.shared.speak(message.text)
+        }
     }
 
     private func commitReply() {

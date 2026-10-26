@@ -8,7 +8,10 @@
 "NSBluetoothAlwaysUsageDescription" = "O Vorssaint usa o Bluetooth apenas para ler a bateria dos periféricos conectados. Nada sai do seu Mac.";
 
 /* macOS Microphone permission prompt. */
-"NSMicrophoneUsageDescription" = "O Vorssaint grava seu microfone apenas quando você o ativa em uma gravação de tela. O áudio fica no seu Mac, a menos que você escolha criar um link temporário.";
+"NSMicrophoneUsageDescription" = "O Vorssaint grava seu microfone apenas quando você o ativa em uma gravação de tela. O áudio fica no seu Mac, a menos que você escolha criar um link temporário. Ele também escuta enquanto você dita uma mensagem para o VERTUS na Dynamic Island.";
+
+/* macOS Speech Recognition permission prompt. */
+"NSSpeechRecognitionUsageDescription" = "O Vorssaint transforma sua fala em texto apenas enquanto você dita uma mensagem para o VERTUS na Dynamic Island. O reconhecimento roda neste Mac quando ele é compatível; caso contrário, a Apple processa o áudio.";
 
 /* macOS Camera permission prompt. */
 "NSCameraUsageDescription" = "O Vorssaint mostra sua câmera apenas na janela de prévia que você abre, para conferir como você está antes de uma chamada. Nada é gravado nem sai do seu Mac.";

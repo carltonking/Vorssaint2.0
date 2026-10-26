@@ -24,6 +24,76 @@ enum NotchHermesChatTests {
         silenceContracts(suite)
         routineReplyContracts(suite)
         reachOutContracts(suite)
+        voiceContracts(suite)
+    }
+
+    /// Talking to VERTUS: the microphone's states, when a pause ends a
+    /// sentence, and what a Markdown reply sounds like read aloud.
+    private static func voiceContracts(_ suite: TestSuite) {
+        typealias Voice = NotchHermesVoiceSupport
+        suite.expect(Voice.transition(.idle, .toggle) == (.requesting, .requestPermission),
+                     "the first press asks for access before listening")
+        suite.expect(Voice.transition(.requesting, .permission(granted: true)) == (.listening, .startListening),
+                     "access granted starts the microphone")
+        suite.expect(Voice.transition(.requesting, .permission(granted: false)) == (.denied, .explainDenied),
+                     "access refused says why and stays refused")
+        suite.expect(Voice.transition(.requesting, .toggle) == (.requesting, .none),
+                     "a second press while the prompts are up does nothing")
+        for event in [Voice.Event.toggle, .silence, .ended] {
+            suite.expect(Voice.transition(.listening, event) == (.idle, .stopAndSend),
+                         "pressing again, a pause or the recognizer ending sends what was heard (\(event))")
+        }
+        suite.expect(Voice.transition(.idle, .silence) == (.idle, .none),
+                     "a late pause after stopping sends nothing twice")
+        for event in [Voice.Event.toggle, .permission(granted: true), .silence, .ended] {
+            suite.expect(Voice.transition(.denied, event).effect == .none,
+                         "nothing listens once access was refused (\(event))")
+        }
+        suite.expect(Voice.initialPhase(speech: .granted, microphone: .denied) == .denied
+                     && Voice.initialPhase(speech: .denied, microphone: .undetermined) == .denied,
+                     "a refusal recorded earlier disables the button from the start")
+        suite.expect(Voice.initialPhase(speech: .undetermined, microphone: .granted) == .idle,
+                     "a permission not yet asked for leaves the button usable")
+
+        suite.expect(!Voice.shouldStop(heardSpeech: true, quietFor: 1.2)
+                     && Voice.shouldStop(heardSpeech: true, quietFor: 1.5),
+                     "a pause of a second and a half after words ends the dictation")
+        suite.expect(!Voice.shouldStop(heardSpeech: false, quietFor: 3)
+                     && Voice.shouldStop(heardSpeech: false, quietFor: 8),
+                     "before the first word the microphone waits longer")
+        suite.expect(Voice.draft(typed: "Remind me", dictated: "to call Ana ") == "Remind me to call Ana"
+                     && Voice.draft(typed: "  ", dictated: "hello") == "hello"
+                     && Voice.draft(typed: "hi", dictated: "") == "hi",
+                     "dictation adds to what was typed rather than replacing it")
+
+        suite.expect(Voice.shouldSpeak(.hermes, enabled: true) && Voice.shouldSpeak(.proactive, enabled: true),
+                     "replies and unasked messages are read aloud when the speaker is on")
+        suite.expect(![NotchHermesChatMessage.Role.person, .tool, .note].contains { Voice.shouldSpeak($0, enabled: true) },
+                     "your own words, tool lines and notes are never read aloud")
+        suite.expect(!Voice.shouldSpeak(.hermes, enabled: false), "the speaker is off by default and stays silent")
+
+        suite.expect(Voice.spokenText("## Results\n- **one** item\n* two\n> quoted") == "Results\none item\ntwo\nquoted",
+                     "headings, bullets, quotes and bold read as their words")
+        suite.expect(Voice.spokenText("See [the docs](https://x.y/z) and ![a chart](c.png).")
+                     == "See the docs and a chart.",
+                     "links and images read as their labels, never their addresses")
+        suite.expect(Voice.spokenText("Run `make test`\n```sh\nmake\n```\n---\nDone") == "Run make test\nmake\nDone",
+                     "code reads as its text, fences and rules as nothing")
+        suite.expect(Voice.spokenText("Use *care* with my_file_name and 2 * 3") == "Use care with my_file_name and 2 * 3",
+                     "emphasis marks go, but a name's underscores and arithmetic stay")
+        suite.expect(Voice.spokenText("| a | b |") == "a b", "table pipes are not read out")
+        suite.expect(Voice.spokenText("**  **\n\n") == "", "a reply of only marks has nothing to say")
+
+        let info = NSDictionary(contentsOfFile: "Resources/Info.plist") as? [String: Any]
+        suite.expect(!(info?["NSSpeechRecognitionUsageDescription"] as? String ?? "").isEmpty
+                     && (info?["NSMicrophoneUsageDescription"] as? String ?? "").contains("VERTUS"),
+                     "the bundle explains why it asks for speech recognition and the microphone")
+        let folders = (try? FileManager.default.contentsOfDirectory(atPath: "Resources"))?
+            .filter { $0.hasSuffix(".lproj") } ?? []
+        suite.expect(!folders.isEmpty && folders.allSatisfy { folder in
+            let strings = (try? String(contentsOfFile: "Resources/\(folder)/InfoPlist.strings", encoding: .utf8)) ?? ""
+            return strings.contains("NSSpeechRecognitionUsageDescription")
+        }, "every language explains the speech recognition prompt")
     }
 
     /// A model writes Markdown; the bubble shows what it means, never the
