@@ -296,6 +296,8 @@ def main():
                     .replace("private func", "func", 1) for prefix in [
                         "    func commitEdits(", "    private func flushSave(", "    private func save(",
                         "    func createPad("])
+          # Obsidian sync bookkeeping the copied methods call; not under test here.
+          + "func endExternalSync() {}\nfunc rememberFileDates() {}\n"
           + "}\n}\n")
     write("WallpaperPicker.swift", "import AppKit\nimport Foundation\nimport UniformTypeIdentifiers\n"
           + "extension WallpaperPickerContract {\nfinal class Service: Fixture {\n"

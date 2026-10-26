@@ -55,6 +55,10 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     private var scopedVaultURL: URL?
     private var hasLoaded = false
     private var isReplacingText = false
+    /// Each open note's file date as this editor last read or wrote it. A
+    /// newer date on disk means Obsidian (or iCloud) changed the note.
+    private var knownFileDates: [String: Date] = [:]
+    private var externalSyncTimer: Timer?
     private(set) var modalInteractionActive = false
 
     private override init() {
@@ -134,6 +138,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
             QuickToolHUD.show(icon: "exclamationmark.triangle", message: strings.loadFailed)
             return
         }
+        beginExternalSync()
         let panel = ensurePanel()
         installMonitors(for: panel)
         // The pad keeps the spot and size the user gave it while the app
@@ -157,12 +162,15 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         marksExpanded = false
         refreshVault()
         guard vaultURL != nil else { return false }
-        return load()
+        let loaded = load()
+        if loaded { beginExternalSync() }
+        return loaded
     }
 
     /// The inline warning leaves with the pad or the island, so a final
     /// write that fails on the way out falls back to the HUD.
     func commitEdits() {
+        endExternalSync()
         flushSave()
         if saveFailed {
             QuickToolHUD.show(
@@ -201,6 +209,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
             let loaded = try store.load()
             apply(loaded)
             hasLoaded = true
+            rememberFileDates()
             return true
         } catch {
             hasLoaded = false
@@ -225,7 +234,52 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     /// A failed write keeps the edits in memory and retries on the next change.
     private func save(_ next: ScratchpadDocument) -> Bool {
         saveFailed = !store.save(next)
+        // Our own write is not an outside change.
+        if !saveFailed { rememberFileDates() }
         return !saveFailed
+    }
+
+    // MARK: Obsidian sync
+
+    /// While the editor is on screen, a note Obsidian (or iCloud) rewrote is
+    /// read back within about a second. Obsidian and iCloud replace the file
+    /// rather than edit it, which a file-descriptor watch would lose, so the
+    /// open notes' dates are compared instead: a handful of stat calls.
+    func beginExternalSync() {
+        guard externalSyncTimer == nil else { return }
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in self?.checkExternalChanges() }
+        timer.tolerance = 0.3
+        RunLoop.main.add(timer, forMode: .common)
+        externalSyncTimer = timer
+    }
+
+    func endExternalSync() {
+        externalSyncTimer?.invalidate()
+        externalSyncTimer = nil
+    }
+
+    private func fileDate(_ path: String) -> Date? {
+        guard let vaultURL else { return nil }
+        let url = vaultURL.appendingPathComponent(path)
+        return (try? FileManager.default.attributesOfItem(atPath: url.path))?[.modificationDate] as? Date
+    }
+
+    private func rememberFileDates() {
+        knownFileDates = Dictionary(uniqueKeysWithValues: pads.map { ($0.path, fileDate($0.path) ?? .distantPast) })
+    }
+
+    /// Reloads when an open note changed outside, unless typing here is still
+    /// waiting to be saved: those words are never thrown away, and the next
+    /// save's own conflict check decides between the two versions.
+    private func checkExternalChanges() {
+        guard hasLoaded, pendingSave == nil, !saveFailed, !isReplacingText else { return }
+        let changed = pads.contains { pad in
+            guard let date = fileDate(pad.path) else { return false }
+            return date > (knownFileDates[pad.path] ?? .distantPast)
+        }
+        guard changed, let loaded = try? store.load() else { return }
+        apply(loaded)
+        rememberFileDates()
     }
 
     private func apply(_ document: ScratchpadDocument, focus: Bool = false) {
