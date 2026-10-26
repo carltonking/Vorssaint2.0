@@ -441,12 +441,25 @@ struct NotchHermesChatView: View {
     /// the model behind it is not the user's concern (the settings page names
     /// it).
     @ViewBuilder private var status: some View {
-        if NotchMascotSupport.isEnabled() {
-            NotchMascotView(look: NotchMascotSupport.look(), mood: companionMood, size: 20,
-                            cue: .celebrate, cueID: chat.completedReplies - (cheeredReplies ?? chat.completedReplies))
-                .frame(width: 20, height: 20)
-                .help(text.title)
-                .accessibilityLabel(text.title)
+        HStack(spacing: 8) {
+            // The agent's own mark beside the pages button: which agent this
+            // page talks to, at a glance.
+            Group {
+                if chat.agent == .vertus {
+                    VertusMark().fill(style: FillStyle(eoFill: true)).frame(width: 14, height: 16)
+                } else {
+                    InstinctMark().fill().frame(width: 6, height: 16)
+                }
+            }
+            .foregroundStyle(.white.opacity(0.9))
+            .help(text.title)
+            .accessibilityLabel(text.title)
+            if NotchMascotSupport.isEnabled() {
+                NotchMascotView(look: NotchMascotSupport.look(), mood: companionMood, size: 20,
+                                cue: .celebrate, cueID: chat.completedReplies - (cheeredReplies ?? chat.completedReplies))
+                    .frame(width: 20, height: 20)
+                    .accessibilityHidden(true)
+            }
         }
     }
 
@@ -698,5 +711,26 @@ private struct NotchAgentApprovalCard: View {
         if approval.choices.contains(.always) {
             NotchPillButton(title: text.allowAlways) { answer(.always) }
         }
+    }
+}
+
+/// Instinct's mark: a serif capital I, its stem pinched at the middle and
+/// flaring into the top and bottom serifs. Drawn so it stays sharp and takes
+/// the island's colour.
+struct InstinctMark: Shape {
+    func path(in rect: CGRect) -> Path {
+        func p(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + rect.width * x, y: rect.minY + rect.height * y)
+        }
+        var path = Path()
+        path.move(to: p(0, 0))
+        path.addLine(to: p(1, 0))
+        path.addQuadCurve(to: p(0.68, 0.5), control: p(0.62, 0.08))
+        path.addQuadCurve(to: p(1, 1), control: p(0.62, 0.92))
+        path.addLine(to: p(0, 1))
+        path.addQuadCurve(to: p(0.32, 0.5), control: p(0.38, 0.92))
+        path.addQuadCurve(to: p(0, 0), control: p(0.38, 0.08))
+        path.closeSubpath()
+        return path
     }
 }
