@@ -446,7 +446,7 @@ struct NotchHermesChatView: View {
             // page talks to, at a glance.
             Group {
                 if chat.agent == .vertus {
-                    VertusWordmark(height: 15)
+                    VertusWordmark(height: 13)
                 } else {
                     InstinctWordmark(height: 13)
                 }
