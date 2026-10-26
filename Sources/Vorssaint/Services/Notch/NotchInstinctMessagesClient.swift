@@ -76,7 +76,7 @@ final class NotchInstinctMessagesClient: NotchAgentChatTransport {
                 guard !self.ended else { return }
                 if result.timedOut {
                     self.emit(.turnFailed("imsg send did not finish."))
-                } else if result.status != 0 {
+                } else if result.status != 0, !Support.probablySent(result.output) {
                     self.emit(Support.isUnreadable(result.output) ? .needsFullDiskAccess
                               : .turnFailed(Support.reason(result.output)))
                 } else {

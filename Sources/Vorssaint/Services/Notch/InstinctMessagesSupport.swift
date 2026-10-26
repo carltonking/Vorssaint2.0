@@ -101,6 +101,14 @@ enum InstinctMessagesSupport {
     }
 
     /// The last line `imsg` wrote, as the reason a command failed.
+    /// imsg reports `may_have_completed` when Messages accepted the text but
+    /// the outgoing row did not show up in its database within its window —
+    /// in practice the message went out (Instinct answers it). It counts as
+    /// sent; the thread's own echo confirms it.
+    static func probablySent(_ output: String) -> Bool {
+        output.contains("may_have_completed")
+    }
+
     static func reason(_ output: String) -> String {
         output.split(whereSeparator: \.isNewline)
             .map { $0.trimmingCharacters(in: .whitespaces) }

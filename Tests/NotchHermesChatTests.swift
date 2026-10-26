@@ -23,6 +23,7 @@ enum NotchHermesChatTests {
         hubContracts(suite)
         approvalContracts(suite)
         historyContracts(suite)
+        instinctSendContracts(suite)
         silenceContracts(suite)
         routineReplyContracts(suite)
         reachOutContracts(suite)
@@ -1068,5 +1069,14 @@ enum NotchHermesChatTests {
                          && words.fullDiskAccess("Vorssaint (Developer)").contains("Vorssaint (Developer)"),
                          "the Instinct page names Instinct, not VERTUS, in \(language.rawValue)")
         }
+    }
+
+    /// A text Messages accepted but imsg could not see land in time still went
+    /// out: it is not reported as a failure.
+    private static func instinctSendContracts(_ suite: TestSuite) {
+        let unsure = "applescript send failed (may_have_completed): Messages automation returned success, but no matching outgoing text row was observed within 8 seconds."
+        suite.expect(InstinctMessagesSupport.probablySent(unsure), "an unconfirmed but accepted send counts as sent")
+        suite.expect(!InstinctMessagesSupport.probablySent("Error: chat.db is not readable"),
+                     "a real failure is still a failure")
     }
 }
