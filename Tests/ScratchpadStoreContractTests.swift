@@ -70,7 +70,7 @@ enum ScratchpadStoreContractTests {
             suite.expect(tree.first?.children?.map(\.name) == ["Deep", "Plan"]
                     && tree.first?.children?.first?.children?.map(\.path) == ["Projects/Deep/Idea.md"],
                    "folders nest with each note's path relative to the vault")
-            _ = try store.load(defaultName: "Scratchpad", now: now)
+            _ = try store.load()
             let listed = tree.first { $0.name == "A note" }!
             let opened = ScratchpadVaultSupport.fileURL(forRelativePath: listed.path, in: vault)
                 .flatMap { store.openNote(at: $0, in: store.lastSavedDocument!) }
@@ -90,31 +90,31 @@ enum ScratchpadStoreContractTests {
         fixture { vault, _, store in
             suite.expect(!store.save(ScratchpadDocument.initial(defaultName: "Scratchpad")),
                    "a note cannot be saved before the vault has been read")
-            let loaded = try store.load(defaultName: "Scratchpad", now: now)
-            let firstURL = vault.appendingPathComponent("Scratchpad.md")
+            let loaded = try store.load()
+            let firstURL = vault.appendingPathComponent("Todo.md")
             suite.expect(loaded.pads.count == 1
-                    && loaded.pads[0].name == "Scratchpad"
-                    && loaded.pads[0].path == "Scratchpad.md"
+                    && loaded.pads[0].name == "Todo"
+                    && loaded.pads[0].path == "Todo.md"
                     && manager.fileExists(atPath: firstURL.path),
-                   "a vault with no open notes starts with a new Markdown file")
+                   "a vault with no open notes opens its Todo.md, creating it when missing")
             var edited = loaded
             edited.updateSelectedText("# First note", modifiedAt: now)
             suite.expect(store.save(edited)
                     && (try? String(contentsOf: firstURL, encoding: .utf8)) == "# First note",
                    "typing writes the note straight into its Markdown file")
-            let reopened = try store.load(defaultName: "Scratchpad", now: now)
+            let reopened = try store.load()
             suite.expect(reopened.pads.map(\.text) == ["# First note"],
                    "the open note comes back from the file")
         }
 
         fixture { vault, _, store in
-            let loaded = try store.load(defaultName: "Scratchpad", now: now)
+            let loaded = try store.load()
             guard let withSecond = store.createNote(named: "Ideas", in: loaded) else {
                 suite.expect(false, "a new note is created")
                 return
             }
             let secondURL = vault.appendingPathComponent("Ideas.md")
-            suite.expect(withSecond.pads.map(\.name) == ["Scratchpad", "Ideas"]
+            suite.expect(withSecond.pads.map(\.name) == ["Todo", "Ideas"]
                     && withSecond.selectedID == withSecond.pads[1].id
                     && manager.fileExists(atPath: secondURL.path),
                    "a new tab is a new note file in the vault")
@@ -131,7 +131,7 @@ enum ScratchpadStoreContractTests {
                     && !manager.fileExists(atPath: secondURL.path)
                     && (try? String(contentsOf: renamedURL, encoding: .utf8)) == "Second",
                    "renaming a tab renames its file and keeps the text")
-            suite.expect(store.renameNote(renamed.pads[1].id, to: "Scratchpad", in: renamed) == nil
+            suite.expect(store.renameNote(renamed.pads[1].id, to: "Todo", in: renamed) == nil
                     && manager.fileExists(atPath: renamedURL.path),
                    "a name already in the vault cannot be taken")
             guard let closed = store.closeNote(renamed.pads[1].id, in: renamed) else {
@@ -152,7 +152,7 @@ enum ScratchpadStoreContractTests {
             try "# Existing".write(to: noteURL, atomically: true, encoding: .utf8)
             try "ignore".write(to: notes.appendingPathComponent("Scan.txt"),
                                atomically: true, encoding: .utf8)
-            let loaded = try store.load(defaultName: "Scratchpad", now: now)
+            let loaded = try store.load()
             guard let opened = store.openNote(at: noteURL, in: loaded) else {
                 suite.expect(false, "an existing vault note opens")
                 return
@@ -168,13 +168,13 @@ enum ScratchpadStoreContractTests {
             defer { try? manager.removeItem(at: outside) }
             suite.expect(store.openNote(at: outside, in: opened) == nil,
                    "a Markdown file outside the chosen vault cannot be opened")
-            let reopened = try store.load(defaultName: "Scratchpad", now: now)
+            let reopened = try store.load()
             suite.expect(reopened.pads.map(\.path) == opened.pads.map(\.path),
                    "the open notes and their order come back after reopening")
         }
 
         fixture { vault, _, store in
-            let loaded = try store.load(defaultName: "Scratchpad", now: now)
+            let loaded = try store.load()
             let url = vault.appendingPathComponent(loaded.pads[0].path)
             try "From Obsidian".write(to: url, atomically: true, encoding: .utf8)
             var edited = loaded
@@ -182,9 +182,83 @@ enum ScratchpadStoreContractTests {
             suite.expect(!store.save(edited)
                     && (try? String(contentsOf: url, encoding: .utf8)) == "From Obsidian",
                    "an autosave never overwrites a note Obsidian changed meanwhile")
-            let reloaded = try store.load(defaultName: "Scratchpad", now: now)
+            let reloaded = try store.load()
             suite.expect(reloaded.pads[0].text == "From Obsidian",
                    "reopening the pad shows the text Obsidian wrote")
+        }
+
+        fixture { vault, _, store in
+            let loaded = try store.load()
+            guard let both = store.createNote(named: "Ideas", in: loaded) else {
+                suite.expect(false, "a second note is created")
+                return
+            }
+            let todoURL = vault.appendingPathComponent("Todo.md")
+            let ideasURL = vault.appendingPathComponent("Ideas.md")
+            try "Synced by iCloud".write(to: ideasURL, atomically: true, encoding: .utf8)
+            var edited = both
+            edited.pads[0].text = "- [ ] milk"
+            suite.expect(store.save(edited)
+                    && (try? String(contentsOf: todoURL, encoding: .utf8)) == "- [ ] milk"
+                    && (try? String(contentsOf: ideasURL, encoding: .utf8)) == "Synced by iCloud",
+                   "a note rewritten outside while its tab sat unedited is not a failed save of the others")
+        }
+
+        fixture { vault, _, store in
+            let loaded = try store.load()
+            guard let both = store.createNote(named: "Ideas", in: loaded) else {
+                suite.expect(false, "a second note is created")
+                return
+            }
+            let todoURL = vault.appendingPathComponent("Todo.md")
+            let ideasURL = vault.appendingPathComponent("Ideas.md")
+            try "From Obsidian".write(to: ideasURL, atomically: true, encoding: .utf8)
+            var edited = both
+            edited.pads[1].text = "Typed here"
+            suite.expect(!store.save(edited)
+                    && (try? String(contentsOf: ideasURL, encoding: .utf8)) == "From Obsidian",
+                   "typing over a note Obsidian changed meanwhile is still refused")
+            edited.pads[0].text = "Later edit"
+            edited.pads[1].text = both.pads[1].text
+            suite.expect(store.save(edited)
+                    && (try? String(contentsOf: todoURL, encoding: .utf8)) == "Later edit",
+                   "one refused note does not make later edits of another note fail")
+        }
+
+        fixture { vault, _, store in
+            let todoURL = vault.appendingPathComponent("Todo.md")
+            try "- [ ] milk".write(to: todoURL, atomically: true, encoding: .utf8)
+            let loaded = try store.load()
+            suite.expect(loaded.pads.map(\.text) == ["- [ ] milk"]
+                    && (try? String(contentsOf: todoURL, encoding: .utf8)) == "- [ ] milk",
+                   "an existing Todo.md opens as it is instead of being replaced")
+        }
+
+        fixture { vault, defaults, _ in
+            let root = vault.deletingLastPathComponent()
+            let other = root.appendingPathComponent("Other")
+            let outside = root.appendingPathComponent("Loose")
+            try manager.createDirectory(at: other, withIntermediateDirectories: true)
+            try manager.createDirectory(at: outside, withIntermediateDirectories: true)
+            let inside = vault.appendingPathComponent("Inside.md")
+            let loose = outside.appendingPathComponent("Loose.md")
+            try "in".write(to: inside, atomically: true, encoding: .utf8)
+            try "out".write(to: loose, atomically: true, encoding: .utf8)
+            defaults.set(["Todo.md"], forKey: DefaultsKey.scratchpadOpenNotes)
+            let folder = ScratchpadVaultSupport.adoptLocation(other, currentVault: vault, defaults: defaults)
+            suite.expect(folder?.path == other.standardizedFileURL.path
+                    && defaults.stringArray(forKey: DefaultsKey.scratchpadOpenNotes) == [],
+                   "a chosen folder becomes the vault and lets go of the old vault's tabs")
+            defaults.set(["Todo.md"], forKey: DefaultsKey.scratchpadOpenNotes)
+            let same = ScratchpadVaultSupport.adoptLocation(inside, currentVault: vault, defaults: defaults)
+            suite.expect(same?.path == vault.standardizedFileURL.path
+                    && defaults.stringArray(forKey: DefaultsKey.scratchpadOpenNotes) == ["Todo.md", "Inside.md"]
+                    && defaults.string(forKey: DefaultsKey.scratchpadSelectedNote) == "Inside.md",
+                   "a note inside the vault opens in place as the selected tab")
+            let parent = ScratchpadVaultSupport.adoptLocation(loose, currentVault: vault, defaults: defaults)
+            suite.expect(parent?.path == outside.standardizedFileURL.path
+                    && defaults.stringArray(forKey: DefaultsKey.scratchpadOpenNotes) == ["Loose.md"],
+                   "a note outside the vault opens in place with its folder as the vault")
         }
 
         fixture { vault, defaults, store in
@@ -224,7 +298,7 @@ enum ScratchpadStoreContractTests {
 
         fixture { _, defaults, _ in
             var unavailable = ScratchpadStore(vaultURL: nil, defaults: defaults)
-            suite.expect((try? unavailable.load(defaultName: "Scratchpad", now: now)) == nil
+            suite.expect((try? unavailable.load()) == nil
                     && !unavailable.save(ScratchpadDocument.initial(defaultName: "Scratchpad"))
                     && defaults.stringArray(forKey: DefaultsKey.scratchpadOpenNotes) == nil,
                    "no vault means no note is read or written")

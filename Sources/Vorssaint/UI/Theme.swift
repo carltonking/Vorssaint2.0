@@ -287,6 +287,34 @@ struct DiscordMark: View {
     }
 }
 
+/// The Obsidian logo for the pad that edits Obsidian notes. It is drawn as a
+/// template so it takes the tint of the row it sits in, like the SF Symbols
+/// beside it.
+struct ObsidianMark: View {
+    var width: CGFloat
+
+    private static let mark: NSImage? = {
+        guard let url = Bundle.main.url(forResource: "obsidian",
+                                        withExtension: "png",
+                                        subdirectory: "Images"),
+              let image = NSImage(contentsOf: url) else { return nil }
+        image.isTemplate = true
+        return image
+    }()
+
+    var body: some View {
+        if let mark = Self.mark {
+            Image(nsImage: mark)
+                .renderingMode(.template)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .frame(width: width)
+        } else {
+            Image(systemName: "note.text")
+        }
+    }
+}
+
 /// Squircle badge with the mark on the space gradient — the app's face in the
 /// About tab and onboarding.
 struct BrandBadge: View {

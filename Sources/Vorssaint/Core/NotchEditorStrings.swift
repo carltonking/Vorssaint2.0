@@ -171,7 +171,7 @@ extension FeatureStrings {
             timerSummary: "Timer, Pomodoro and stopwatch.",
             cameraSummary: "A mirror to check yourself before a call.",
             downloadsSummary: "Downloads in progress and just finished.",
-            scratchpadSummary: "Quick notes that save by themselves.",
+            scratchpadSummary: "Your Obsidian notes, edited in place.",
             agentsSummary: "Claude Code, Codex, OpenCode and GitHub Copilot usage, limits and costs.",
             watchSummary: "Any part of a window, read live, with an alert when it changes.",
             hermesChatSummary: "A chat with VERTUS, running on this Mac."
@@ -242,7 +242,7 @@ extension FeatureStrings {
             timerSummary: "Temporizador, Pomodoro e cronômetro.",
             cameraSummary: "Um espelho para se ver antes de uma chamada.",
             downloadsSummary: "Downloads em andamento e os que acabaram de terminar.",
-            scratchpadSummary: "Anotações rápidas que se salvam sozinhas.",
+            scratchpadSummary: "Suas notas do Obsidian, editadas no lugar.",
             agentsSummary: "Uso, limites e custos do Claude Code, do Codex, do OpenCode e do GitHub Copilot.",
             watchSummary: "Qualquer parte de uma janela, lida ao vivo, com aviso quando mudar.",
             hermesChatSummary: "Uma conversa com o VERTUS, rodando neste Mac."
@@ -313,7 +313,7 @@ extension FeatureStrings {
             timerSummary: "Temporizador, Pomodoro y cronómetro.",
             cameraSummary: "Un espejo para verte antes de una llamada.",
             downloadsSummary: "Descargas en curso y las recién terminadas.",
-            scratchpadSummary: "Notas rápidas que se guardan solas.",
+            scratchpadSummary: "Tus notas de Obsidian, editadas en su sitio.",
             agentsSummary: "Uso, límites y costes de Claude Code, Codex, OpenCode y GitHub Copilot.",
             watchSummary: "Cualquier parte de una ventana, leída en directo, con aviso cuando cambie.",
             hermesChatSummary: "Una conversación con VERTUS, que se ejecuta en este Mac."
@@ -384,7 +384,7 @@ extension FeatureStrings {
             timerSummary: "Časovač, Pomodoro a stopky.",
             cameraSummary: "Zrkadlo, v ktorom sa pred hovorom skontrolujete.",
             downloadsSummary: "Prebiehajúce a práve dokončené sťahovania.",
-            scratchpadSummary: "Rýchle poznámky, ktoré sa ukladajú samy.",
+            scratchpadSummary: "Vaše poznámky Obsidian, upravované na mieste.",
             agentsSummary: "Využitie, limity a náklady Claude Code, Codexu, OpenCode a GitHub Copilot.",
             watchSummary: "Ľubovoľná časť okna čítaná naživo s upozornením, keď sa zmení.",
             hermesChatSummary: "Chat s VERTUS, ktorý beží na tomto Macu."
@@ -455,7 +455,7 @@ extension FeatureStrings {
             timerSummary: "Timer, Pomodoro und Stoppuhr.",
             cameraSummary: "Ein Spiegel, um dich vor einem Anruf zu sehen.",
             downloadsSummary: "Laufende und gerade fertige Downloads.",
-            scratchpadSummary: "Schnelle Notizen, die sich selbst sichern.",
+            scratchpadSummary: "Deine Obsidian-Notizen, direkt bearbeitet.",
             agentsSummary: "Nutzung, Limits und Kosten von Claude Code, Codex, OpenCode und GitHub Copilot.",
             watchSummary: "Ein beliebiger Teil eines Fensters, live gelesen, mit Hinweis bei Änderungen.",
             hermesChatSummary: "Ein Chat mit VERTUS, der auf diesem Mac läuft."
@@ -526,7 +526,7 @@ extension FeatureStrings {
             timerSummary: "Minuteur, Pomodoro et chronomètre.",
             cameraSummary: "Un miroir pour vous voir avant un appel.",
             downloadsSummary: "Les téléchargements en cours et ceux qui viennent de finir.",
-            scratchpadSummary: "Des notes rapides qui s’enregistrent seules.",
+            scratchpadSummary: "Vos notes Obsidian, modifiées sur place.",
             agentsSummary: "Utilisation, limites et coûts de Claude Code, Codex, OpenCode et GitHub Copilot.",
             watchSummary: "N’importe quelle partie d’une fenêtre, lue en direct, avec une alerte quand elle change.",
             hermesChatSummary: "Une conversation avec VERTUS, qui tourne sur ce Mac."
@@ -597,7 +597,7 @@ extension FeatureStrings {
             timerSummary: "Timer, Pomodoro e cronometro.",
             cameraSummary: "Uno specchio per guardarti prima di una chiamata.",
             downloadsSummary: "Download in corso e appena completati.",
-            scratchpadSummary: "Note veloci che si salvano da sole.",
+            scratchpadSummary: "Le tue note di Obsidian, modificate sul posto.",
             agentsSummary: "Uso, limiti e costi di Claude Code, Codex, OpenCode e GitHub Copilot.",
             watchSummary: "Qualsiasi parte di una finestra, letta dal vivo, con un avviso quando cambia.",
             hermesChatSummary: "Una chat con VERTUS, in esecuzione su questo Mac."
@@ -668,7 +668,7 @@ extension FeatureStrings {
             timerSummary: "Таймер, помидоро и секундомер.",
             cameraSummary: "Зеркало, чтобы посмотреть на себя перед звонком.",
             downloadsSummary: "Текущие и только что завершённые загрузки.",
-            scratchpadSummary: "Быстрые заметки, которые сохраняются сами.",
+            scratchpadSummary: "Ваши заметки Obsidian, прямо на месте.",
             agentsSummary: "Использование, лимиты и стоимость Claude Code, Codex, OpenCode и GitHub Copilot.",
             watchSummary: "Любая часть окна, читаемая вживую, с оповещением об изменениях.",
             hermesChatSummary: "Чат с VERTUS, запущенным на этом Mac."
@@ -739,7 +739,7 @@ extension FeatureStrings {
             timerSummary: "Zamanlayıcı, Pomodoro ve kronometre.",
             cameraSummary: "Aramadan önce kendinize bakmak için bir ayna.",
             downloadsSummary: "Süren ve yeni biten indirmeler.",
-            scratchpadSummary: "Kendi kendine kaydedilen hızlı notlar.",
+            scratchpadSummary: "Obsidian notlarınız, yerinde düzenlenir.",
             agentsSummary: "Claude Code, Codex, GitHub Copilot ve OpenCode kullanımı, sınırları ve maliyetleri.",
             watchSummary: "Bir pencerenin herhangi bir bölümü, canlı okunur ve değişince haber verilir.",
             hermesChatSummary: "Bu Mac’te çalışan VERTUS ile sohbet."
@@ -810,7 +810,7 @@ extension FeatureStrings {
             timerSummary: "タイマー、ポモドーロ、ストップウォッチ。",
             cameraSummary: "通話前に身だしなみを確認できるミラー。",
             downloadsSummary: "進行中と完了したばかりのダウンロード。",
-            scratchpadSummary: "自動で保存されるクイックメモ。",
+            scratchpadSummary: "Obsidianのノートをその場で編集。",
             agentsSummary: "Claude Code、Codex、OpenCode、GitHub Copilotの使用量、上限、コスト。",
             watchSummary: "ウインドウの好きな部分をライブで読み取り、変化したら知らせます。",
             hermesChatSummary: "このMacで動くVERTUSとのチャット。"
@@ -881,7 +881,7 @@ extension FeatureStrings {
             timerSummary: "타이머, 뽀모도로, 스톱워치.",
             cameraSummary: "통화 전에 모습을 확인하는 거울.",
             downloadsSummary: "진행 중이거나 방금 끝난 다운로드.",
-            scratchpadSummary: "저절로 저장되는 빠른 메모.",
+            scratchpadSummary: "Obsidian 노트를 제자리에서 편집.",
             agentsSummary: "Claude Code, Codex, OpenCode, GitHub Copilot의 사용량, 한도, 비용.",
             watchSummary: "윈도우의 원하는 부분을 실시간으로 읽고 바뀌면 알려 줍니다.",
             hermesChatSummary: "이 Mac에서 실행되는 VERTUS와의 채팅."
@@ -952,7 +952,7 @@ extension FeatureStrings {
             timerSummary: "计时器、番茄钟和秒表。",
             cameraSummary: "通话前照一照的镜子。",
             downloadsSummary: "进行中和刚完成的下载。",
-            scratchpadSummary: "自动保存的快速笔记。",
+            scratchpadSummary: "直接编辑你的 Obsidian 笔记。",
             agentsSummary: "Claude Code、Codex、OpenCode 和 GitHub Copilot 的用量、限额和费用。",
             watchSummary: "实时读取窗口的任意部分，变化时提醒你。",
             hermesChatSummary: "与运行在这台 Mac 上的 VERTUS 对话。"
@@ -1023,7 +1023,7 @@ extension FeatureStrings {
             timerSummary: "計時器、番茄鐘和碼錶。",
             cameraSummary: "通話前照一照的鏡子。",
             downloadsSummary: "進行中和剛完成的下載。",
-            scratchpadSummary: "自動儲存的快速筆記。",
+            scratchpadSummary: "直接編輯你的 Obsidian 筆記。",
             agentsSummary: "Claude Code、Codex、OpenCode 和 GitHub Copilot 的用量、限額和費用。",
             watchSummary: "即時讀取視窗的任何部分，變化時提醒你。",
             hermesChatSummary: "與執行在這台 Mac 上的 VERTUS 對話。"
@@ -1094,7 +1094,7 @@ extension FeatureStrings {
             timerSummary: "計時器、番茄鐘和碼錶。",
             cameraSummary: "通話前照一照的鏡子。",
             downloadsSummary: "進行中和剛完成的下載。",
-            scratchpadSummary: "自動儲存的快速筆記。",
+            scratchpadSummary: "直接編輯你的 Obsidian 筆記。",
             agentsSummary: "Claude Code、Codex、OpenCode 和 GitHub Copilot 的用量、限額和費用。",
             watchSummary: "即時讀取視窗的任何部分，變化時提醒你。",
             hermesChatSummary: "與運行於這台 Mac 的 VERTUS 對話。"
@@ -1165,7 +1165,7 @@ extension FeatureStrings {
             timerSummary: "Таймер, Pomodoro й секундомір.",
             cameraSummary: "Дзеркало, щоб перевірити себе перед викликом.",
             downloadsSummary: "Завантаження, що тривають або щойно завершилися.",
-            scratchpadSummary: "Швидкі нотатки, що зберігаються автоматично.",
+            scratchpadSummary: "Ваші нотатки Obsidian, просто на місці.",
             agentsSummary: "Використання Claude Code, Codex, OpenCode і GitHub Copilot, ліміти й витрати.",
             watchSummary: "Будь-яка частина вікна, яку читають наживо, зі сповіщенням про зміни.",
             hermesChatSummary: "Чат із VERTUS, що працює на цьому Mac."

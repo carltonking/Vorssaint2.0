@@ -8,6 +8,9 @@ import Foundation
 /// keeps every tab pointing at the same file.
 enum ScratchpadVaultSupport {
     static let markdownExtension = "md"
+    /// The note the pad opens when no tab is left open: the vault's to-do
+    /// list, created only if the vault does not have one yet.
+    static let defaultNotePath = "Todo.md"
 
     /// The vault chosen in Settings, as a bookmark first (so a moved vault is
     /// found again) and as a plain path for the first launch after choosing.
@@ -33,6 +36,45 @@ enum ScratchpadVaultSupport {
         guard manager.fileExists(atPath: url.path, isDirectory: &isDirectory),
               isDirectory.boolValue else { return nil }
         return url
+    }
+
+    /// Applies a location picked in Settings and returns the vault it leads
+    /// to. A folder becomes the vault; a Markdown file opens in place, in the
+    /// current vault when it belongs to it and with its own folder as the
+    /// vault otherwise. Tabs of another vault are let go, so a new folder opens
+    /// its `Todo.md` instead of a fresh note named after the pad.
+    static func adoptLocation(_ picked: URL, currentVault: URL?, defaults: UserDefaults) -> URL? {
+        let picked = picked.standardizedFileURL
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: picked.path, isDirectory: &isDirectory) else { return nil }
+        let vault: URL
+        var notePath: String?
+        if isDirectory.boolValue {
+            vault = picked
+        } else {
+            guard isMarkdownFile(picked) else { return nil }
+            if let currentVault, let inside = relativePath(of: picked, in: currentVault) {
+                vault = currentVault.standardizedFileURL
+                notePath = inside
+            } else {
+                vault = picked.deletingLastPathComponent().standardizedFileURL
+                notePath = picked.lastPathComponent
+            }
+        }
+        let sameVault = currentVault?.standardizedFileURL.path == vault.path
+        var open = sameVault ? (defaults.stringArray(forKey: DefaultsKey.scratchpadOpenNotes) ?? []) : []
+        if let notePath {
+            if !open.contains(notePath) {
+                if open.count >= ScratchpadDocument.maximumPadCount { open.removeFirst() }
+                open.append(notePath)
+            }
+            defaults.set(notePath, forKey: DefaultsKey.scratchpadSelectedNote)
+        } else if !sameVault {
+            defaults.removeObject(forKey: DefaultsKey.scratchpadSelectedNote)
+        }
+        defaults.set(open, forKey: DefaultsKey.scratchpadOpenNotes)
+        defaults.set(vault.path, forKey: DefaultsKey.scratchpadVaultPath)
+        return vault
     }
 
     static func bookmark(for url: URL) -> Data? {
@@ -231,8 +273,9 @@ struct ScratchpadStore {
 
     /// Reads the tabs that were open last time. A tab whose file disappeared
     /// or cannot be read is dropped instead of failing every other note; when
-    /// none are left, one new note gives the pad somewhere to type.
-    mutating func load(defaultName: String, now: Date = Date()) throws -> ScratchpadDocument {
+    /// none are left, the vault's `Todo.md` opens. The pad edits the notes the
+    /// vault already holds, so it never invents one of its own to type in.
+    mutating func load() throws -> ScratchpadDocument {
         canSave = false
         lastSavedDocument = nil
         guard let vaultURL else { throw CocoaError(.fileReadNoSuchFile) }
@@ -246,11 +289,18 @@ struct ScratchpadStore {
         }
         let document: ScratchpadDocument
         if pads.isEmpty {
-            let empty = ScratchpadDocument(pads: [], selectedID: UUID())
-            guard let created = createNote(named: defaultName, in: empty, now: now) else {
+            let path = ScratchpadVaultSupport.defaultNotePath
+            guard let url = ScratchpadVaultSupport.fileURL(forRelativePath: path, in: vaultURL) else {
                 throw CocoaError(.fileWriteUnknown)
             }
-            document = created
+            // Created empty only when the vault has no such note yet.
+            if !FileManager.default.fileExists(atPath: url.path),
+               !FileManager.default.createFile(atPath: url.path, contents: Data()) {
+                throw CocoaError(.fileWriteUnknown)
+            }
+            let text = try String(contentsOf: url, encoding: .utf8)
+            let todo = pad(at: url, path: path, text: text)
+            document = ScratchpadDocument(pads: [todo], selectedID: todo.id)
         } else {
             document = ScratchpadDocument(
                 pads: pads,
@@ -268,29 +318,37 @@ struct ScratchpadStore {
         guard canSave else { return false }
         guard let vaultURL else { return false }
         var savedEveryNote = true
-        for pad in document.pads {
+        var record = document
+        var unsaved: Set<String> = []
+        for (index, pad) in document.pads.enumerated() {
+            let previous = lastSavedDocument?.pads.first(where: { $0.path == pad.path })?.text
+            // A tab with nothing typed since it was read has nothing to save.
+            // Obsidian or iCloud rewriting its file meanwhile is not a failed
+            // save: the newer file shows on the next load. Counting it as one
+            // kept the warning up on every opening, because the pad stops
+            // rereading its files while a save is failing.
+            if let previous, previous == pad.text { continue }
             guard let url = ScratchpadVaultSupport.fileURL(forRelativePath: pad.path, in: vaultURL) else {
                 savedEveryNote = false
+                unsaved.insert(pad.path)
                 continue
             }
             let onDisk = try? String(contentsOf: url, encoding: .utf8)
             if onDisk == pad.text { continue }
             // Obsidian may have written this note while the tab was open. Its
             // text wins over an autosave typed before the app saw the change.
-            if let onDisk,
-               let previous = lastSavedDocument?.pads.first(where: { $0.path == pad.path })?.text,
-               onDisk != previous,
-               onDisk != pad.text {
+            let changedOutside = onDisk != nil && previous != nil && onDisk != previous
+            if changedOutside || (try? pad.text.write(to: url, atomically: true, encoding: .utf8)) == nil {
                 savedEveryNote = false
-                continue
-            }
-            guard (try? pad.text.write(to: url, atomically: true, encoding: .utf8)) != nil else {
-                savedEveryNote = false
-                continue
+                if let previous { record.pads[index].text = previous } else { unsaved.insert(pad.path) }
             }
         }
         persistWorkspace(document)
-        if savedEveryNote { lastSavedDocument = document }
+        // Each note remembers its own last write, so one note that cannot be
+        // saved does not make every later edit of the others look like a
+        // conflict with Obsidian.
+        record.pads.removeAll { unsaved.contains($0.path) }
+        lastSavedDocument = record
         return savedEveryNote
     }
 

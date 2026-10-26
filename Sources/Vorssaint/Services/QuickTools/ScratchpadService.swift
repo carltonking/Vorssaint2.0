@@ -197,9 +197,8 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
             flushSave()
             if saveFailed { return true }
         }
-        let defaultName = FeatureStrings.scratchpad(L10n.shared.language).pageTitle
         do {
-            let loaded = try store.load(defaultName: defaultName)
+            let loaded = try store.load()
             apply(loaded)
             hasLoaded = true
             return true
@@ -319,10 +318,14 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
         let strings = FeatureStrings.scratchpad(L10n.shared.language)
         commitEdits()
         let panel = NSOpenPanel()
-        panel.canChooseFiles = false
+        // A folder becomes the vault, and a Markdown file opens in place.
+        panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
         panel.canCreateDirectories = true
+        if let markdown = UTType(filenameExtension: ScratchpadVaultSupport.markdownExtension) {
+            panel.allowedContentTypes = [markdown, .folder]
+        }
         panel.prompt = strings.chooseVault
         panel.message = strings.vaultCaption
         panel.directoryURL = vaultURL
@@ -338,19 +341,19 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     }
 
     private func adoptVault(_ url: URL) {
-        let standardized = url.standardizedFileURL
         let defaults = UserDefaults.standard
-        if let bookmark = ScratchpadVaultSupport.bookmark(for: standardized) {
+        guard let vault = ScratchpadVaultSupport.adoptLocation(url, currentVault: vaultURL,
+                                                               defaults: defaults) else { return }
+        if let bookmark = ScratchpadVaultSupport.bookmark(for: vault) {
             defaults.set(bookmark, forKey: DefaultsKey.scratchpadVaultBookmark)
         } else {
             defaults.removeObject(forKey: DefaultsKey.scratchpadVaultBookmark)
         }
-        defaults.set(standardized.path, forKey: DefaultsKey.scratchpadVaultPath)
         hasLoaded = false
         document = nil
         refreshVault()
         let strings = FeatureStrings.scratchpad(L10n.shared.language)
-        let imported = store.importLegacyNotes(defaultName: strings.pageTitle)
+        let imported = store.importLegacyNotes(defaultName: strings.newNoteName)
         if imported > 0 {
             QuickToolHUD.show(icon: "checkmark.circle",
                               message: String(format: strings.importedNotesFormat, imported))
@@ -736,7 +739,7 @@ final class ScratchpadService: NSObject, ObservableObject, NSWindowDelegate {
     private func performFocusedTabShortcut(_ action: ScratchpadFocusedShortcut.Action) {
         switch action {
         case .createPad:
-            createPad(defaultName: FeatureStrings.scratchpad(L10n.shared.language).pageTitle)
+            createPad(defaultName: FeatureStrings.scratchpad(L10n.shared.language).newNoteName)
         case .closeSelectedPad:
             keyboardCloseSelectedPadSerial += 1
         case .hidePad:

@@ -980,6 +980,7 @@ struct UtilitiesSection: View {
             UtilityActionButton(title: FeatureStrings.scratchpad(l10n.language).pageTitle,
                                 caption: FeatureStrings.scratchpad(l10n.language).panelCaption,
                                 systemImage: "note.text",
+                                usesObsidianMark: true,
                                 isEditing: editing,
                                 showsDragHandle: true,
                                 visibility: $showScratchpad,
@@ -2052,6 +2053,8 @@ struct UtilityActionButton: View {
     let title: String
     let caption: String
     let systemImage: String
+    /// Draws the Obsidian logo instead of `systemImage`.
+    var usesObsidianMark = false
     var badge: String? = nil
     var isEditing = false
     var showsDragHandle = false
@@ -2141,7 +2144,13 @@ struct UtilityActionButton: View {
             if isEditing && showsDragHandle {
                 PanelDragHandle()
             }
-            Image(systemName: systemImage)
+            Group {
+                if usesObsidianMark {
+                    ObsidianMark(width: 15)
+                } else {
+                    Image(systemName: systemImage)
+                }
+            }
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(iconColor)
                 .frame(width: PanelRowMetrics.iconWidth)
