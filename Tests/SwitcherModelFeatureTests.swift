@@ -2668,6 +2668,16 @@ enum SwitcherModelFeatureTests {
                                                            metricsEnabled: true, renderedTitleLength: 12,
                                                            mustShowForSignal: false),
                "the glyph never hides while the option is off")
+        suite.expect(MenuBarSpacingSupport.mainItemClickOpensSystem(optionEnabled: true, separateMetrics: false,
+                                                                    metricsEnabled: true),
+               "a click on the main item showing only metrics opens the System page")
+        suite.expect(!MenuBarSpacingSupport.mainItemClickOpensSystem(optionEnabled: false, separateMetrics: false,
+                                                                     metricsEnabled: true)
+                     && !MenuBarSpacingSupport.mainItemClickOpensSystem(optionEnabled: true, separateMetrics: true,
+                                                                        metricsEnabled: true)
+                     && !MenuBarSpacingSupport.mainItemClickOpensSystem(optionEnabled: true, separateMetrics: false,
+                                                                        metricsEnabled: false),
+               "with the glyph showing, metrics in their own items, or no metrics, the main item keeps its panel")
         suite.expect(!MenuBarSpacingSupport.shouldHideStatusIcon(optionEnabled: true, separateMetrics: false,
                                                            metricsEnabled: true, renderedTitleLength: 0,
                                                            mustShowForSignal: false),

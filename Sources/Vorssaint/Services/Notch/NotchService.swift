@@ -1936,6 +1936,13 @@ final class NotchService: ObservableObject {
         return true
     }
 
+    /// Opens the System page; with `toggle`, a second press closes it.
+    func showSystem(toggle: Bool = false) {
+        if toggle, expanded, selected == .system, selectedMetric == nil,
+           !showingAppPanel, !showingSections, !showingCommandBar { collapseFromShortcut(); return }
+        open(.system)
+    }
+
     func showMetric(_ metric: MetricDetailKind, toggle: Bool = false) {
         guard metricIsAvailable(metric) else { return }
         if toggle, expanded, selectedMetric == metric, !showingSections, !showingCommandBar { collapseFromShortcut(); return }

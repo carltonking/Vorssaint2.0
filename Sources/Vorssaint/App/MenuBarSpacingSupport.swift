@@ -217,6 +217,15 @@ enum MenuBarSpacingSupport {
     ///   status items and the main one would otherwise be empty.
     /// - `mustShowForSignal` brings the glyph back while it carries a signal
     ///   (update available, a running Keep Awake, mic muted indicator).
+    /// Clicking the main item while it shows only metrics (the glyph hidden
+    /// in favour of CPU/GPU…) is asking about those metrics, so it opens the
+    /// island's System page rather than the app panel's last section (user
+    /// request: a CPU/GPU click landed on Keep Awake).
+    static func mainItemClickOpensSystem(optionEnabled: Bool, separateMetrics: Bool,
+                                         metricsEnabled: Bool) -> Bool {
+        optionEnabled && !separateMetrics && metricsEnabled
+    }
+
     static func shouldHideStatusIcon(optionEnabled: Bool,
                                      separateMetrics: Bool,
                                      metricsEnabled: Bool,

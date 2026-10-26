@@ -486,6 +486,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
 
     private func toggleMainPopover() {
         if NotchSupport.routesAppPanel(), NotchService.shared.acceptsSystemFeedback {
+            let defaults = UserDefaults.standard
+            if MenuBarSpacingSupport.mainItemClickOpensSystem(
+                optionEnabled: defaults.bool(forKey: DefaultsKey.menuBarHideIconWithMetrics),
+                separateMetrics: defaults.bool(forKey: DefaultsKey.menuBarSeparateMetrics),
+                metricsEnabled: MenuBarMetric.anyEnabled(in: defaults)),
+               NotchSupport.modules().contains(.system) {
+                NotchService.shared.showSystem(toggle: true); return
+            }
             NotchService.shared.openAppPanel(toggle: true); return
         }
         if !popoverIsOpen {
