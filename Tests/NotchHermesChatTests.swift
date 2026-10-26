@@ -25,6 +25,7 @@ enum NotchHermesChatTests {
         historyContracts(suite)
         instinctSendContracts(suite)
         instinctReactionContracts(suite)
+        vertusMessagesContracts(suite)
         silenceContracts(suite)
         routineReplyContracts(suite)
         reachOutContracts(suite)
@@ -1157,5 +1158,51 @@ enum NotchHermesChatTests {
         suite.expect(oldLines.count == 1 && oldLines.first?.text == "from before"
                      && oldLines.first?.reactions == nil && oldLines.first?.replyTo == nil,
                      "a history saved before tapbacks and replies existed still reads")
+    }
+
+    /// VERTUS texted at its Photon line: with a number the page is the
+    /// iMessage thread (Instinct's client), without one it is VERTUS on this
+    /// Mac exactly as before. Instinct has no other way in.
+    private static func vertusMessagesContracts(_ suite: TestSuite) {
+        typealias Support = InstinctMessagesSupport
+        suite.expect(Support.transport(messagesOnly: false, number: nil) == .onThisMac
+                     && Support.transport(messagesOnly: false, number: "  ") == .onThisMac,
+                     "without a number VERTUS stays on this Mac (hub, approvals and all)")
+        suite.expect(Support.transport(messagesOnly: false, number: " +1 555 123 4567 ")
+                        == .messages(number: "+1 555 123 4567"),
+                     "with a number VERTUS's page is its iMessage thread")
+        suite.expect(Support.transport(messagesOnly: true, number: "") == .missingNumber
+                     && Support.transport(messagesOnly: true, number: "+15551234567") == .messages(number: "+15551234567"),
+                     "Instinct needs its number and is only ever texted")
+        suite.expect(Support.historyFile(base: "vertus-chat.json", transport: .onThisMac) == "vertus-chat.json"
+                     && Support.historyFile(base: "vertus-chat.json", transport: .messages(number: "+1"))
+                        == "vertus-imessage-chat.json"
+                     && Support.historyFile(base: "instinct-chat.json", transport: .messages(number: "+1"))
+                        == "instinct-chat.json",
+                     "VERTUS's thread is saved apart, so clearing the number brings back the conversation on this Mac")
+
+        let chats = [
+            #"{"id":1,"identifier":"+16506309054","display_name":"","name":"","participants":["+16506309054"],"is_group":false}"#,
+            #"{"id":2,"identifier":"chat99","display_name":"Family","participants":["+1","+2"],"is_group":true}"#,
+            #"{"id":3,"identifier":"luma@rbm.goog","display_name":"Luma","participants":["luma@rbm.goog"],"is_group":false}"#,
+            #"{"id":4,"identifier":"+1 (650) 630-9054","participants":["+16506309054"],"is_group":false}"#,
+        ].joined(separator: "\n")
+        let recent = Support.recentContacts(in: chats)
+        suite.expect(recent.map(\.identifier) == ["+16506309054", "luma@rbm.goog"] && recent.last?.name == "Luma",
+                     "the number picker offers recent one-to-one threads, each person once, with their name")
+
+        suite.expect(SettingsBackupSupport.machineStateKeys.contains(DefaultsKey.notchHermesChatNumber)
+                     && Defaults.registeredDefaults[DefaultsKey.notchHermesChatNumber] as? String == "",
+                     "VERTUS's number starts empty and never leaves this Mac in a settings backup")
+        let languages = AppLanguage.allCases.map { FeatureStrings.notchHermesChat($0) }
+        suite.expect(languages.allSatisfy { $0.number.contains("VERTUS") && !$0.numberHint.isEmpty },
+                     "every language names the VERTUS number field")
+
+        let service = (try? String(contentsOfFile: "Sources/Vorssaint/Services/Notch/NotchHermesChatService.swift",
+                                   encoding: .utf8)) ?? ""
+        suite.expect(service.contains("case .vertus: return DefaultsKey.notchHermesChatNumber")
+                     && service.contains("case .messages(let number):\n            connectToMessages(home: home, number: number)")
+                     && service.contains("case .onThisMac:\n            break"),
+                     "the VERTUS page connects through iMessage when its number is set, else as before")
     }
 }

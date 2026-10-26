@@ -81,9 +81,17 @@ final class NotchHermesChatService: ObservableObject {
             }
         }
 
-        /// VERTUS takes one prompt at a time, so a message typed while it
-        /// writes waits its turn. Texts can follow each other freely.
-        var holdsMessagesWhileWorking: Bool { self == .vertus }
+        /// Where the number this page texts is kept: Instinct's always, VERTUS's
+        /// once its Photon line is given.
+        var numberKey: String {
+            switch self {
+            case .vertus: return DefaultsKey.notchHermesChatNumber
+            case .instinct: return DefaultsKey.notchInstinctNumber
+            }
+        }
+
+        /// Instinct has no other way in than iMessage.
+        var messagesOnly: Bool { self == .instinct }
     }
 
     static let shared = NotchHermesChatService(agent: .vertus)
@@ -106,6 +114,9 @@ final class NotchHermesChatService: ObservableObject {
     enum Failure: Equatable {
         /// Nothing runs at the command set in Settings.
         case notFound(String)
+        /// The `imsg` tool that reads and sends the iMessage thread is not
+        /// installed where the island looks.
+        case messagesToolMissing(String)
         /// The server started but could not be spoken to, in its own words
         /// or the island's.
         case unreachable(String)
@@ -122,7 +133,7 @@ final class NotchHermesChatService: ObservableObject {
         // replace the file before it was read.
         didSet { if historyRestored, messages != oldValue { historyStore.save(messages) } }
     }
-    private let historyStore: NotchHermesChatHistoryStore
+    private var historyStore: NotchHermesChatHistoryStore
     private var historyRestored = false
     private var historyRequested = false
     /// The other side's own copy of the conversation came in (Instinct's
@@ -150,6 +161,43 @@ final class NotchHermesChatService: ObservableObject {
             let merged = NotchHermesChatHistory.restored(saved: saved, current: self.messages)
             if merged != self.messages { self.messages = merged }
         }
+    }
+
+    /// What carries the conversation now, from the number in Settings.
+    var transport: InstinctMessagesSupport.Transport {
+        InstinctMessagesSupport.transport(messagesOnly: agent.messagesOnly,
+                                          number: UserDefaults.standard.string(forKey: agent.numberKey))
+    }
+
+    /// The page shows an iMessage thread (Instinct's, or VERTUS's Photon
+    /// line), so the links in it get preview cards.
+    var carriesMessagesThread: Bool {
+        if case .messages = transport { return true }
+        return false
+    }
+
+    /// VERTUS's iMessage thread and its conversation on this Mac are kept in
+    /// separate files. Giving or clearing the number swaps which one the page
+    /// shows, saving the one it leaves.
+    private func followHistoryFile() {
+        let file = InstinctMessagesSupport.historyFile(base: agent.historyFile, transport: transport)
+        guard file != historyStore.fileName else { return }
+        flushHistory()
+        historyStore = NotchHermesChatHistoryStore(fileName: file)
+        historyRestored = false
+        historyRequested = false
+        threadArrived = false
+        unconfirmed = []
+        lastAnswer = nil
+        heldMessage = nil
+        messages = []
+        reply = ""
+        thinking = ""
+        if working { working = false }
+        if !approvals.isEmpty { approvals = [] }
+        if !answering.isEmpty { answering = [] }
+        releasePin()
+        watchCursor.reset()
     }
 
     /// Before the app quits: the last few lines must not wait on the debounce.
@@ -203,7 +251,11 @@ final class NotchHermesChatService: ObservableObject {
 
     private init(agent: Agent) {
         self.agent = agent
-        historyStore = NotchHermesChatHistoryStore(fileName: agent.historyFile)
+        historyStore = NotchHermesChatHistoryStore(fileName: InstinctMessagesSupport.historyFile(
+            base: agent.historyFile,
+            transport: InstinctMessagesSupport.transport(
+                messagesOnly: agent.messagesOnly,
+                number: UserDefaults.standard.string(forKey: agent.numberKey))))
         switch agent {
         case .vertus:
             hotkey = QuickToolHotkey(id: 82)
@@ -243,6 +295,7 @@ final class NotchHermesChatService: ObservableObject {
     /// Settings. Called by the feature runtime and by the settings controls.
     func syncWithPreferences() {
         syncShortcut()
+        followHistoryFile()
         if agent.feature.isAvailable,
            UserDefaults.standard.bool(forKey: agent.enabledKey) { restoreHistory() }
         guard agent.feature.isAvailable,
@@ -297,15 +350,25 @@ final class NotchHermesChatService: ObservableObject {
         client = nil
         generation = UUID()
         currentRun = nil
+        // A number given or cleared in Settings retries: the page moves to
+        // the other conversation and brings back what was saved of it.
+        followHistoryFile()
+        if agent.feature.isAvailable, UserDefaults.standard.bool(forKey: agent.enabledKey) { restoreHistory() }
         connect()
     }
 
     private func connect() {
         guard agent.feature.isAvailable, AppFeature.notch.isAvailable else { return }
         let home = FileManager.default.homeDirectoryForCurrentUser
-        if agent == .instinct {
-            connectToMessages(home: home)
+        switch transport {
+        case .messages(let number):
+            connectToMessages(home: home, number: number)
             return
+        case .missingNumber:
+            state = .failed(.noNumber)
+            return
+        case .onThisMac:
+            break
         }
         // The hub owns VERTUS when it is installed: one agent for every
         // surface, rather than a second engine with its own model and memory.
@@ -349,20 +412,15 @@ final class NotchHermesChatService: ObservableObject {
         client.start()
     }
 
-    /// Instinct's thread, through `imsg`: the number from Settings, the tool
-    /// wherever Homebrew or the PATH put it.
-    private func connectToMessages(home: URL) {
-        let number = (UserDefaults.standard.string(forKey: DefaultsKey.notchInstinctNumber) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !number.isEmpty else {
-            state = .failed(.noNumber)
-            return
-        }
+    /// The iMessage thread with the number from Settings (Instinct, or
+    /// VERTUS's Photon line), through `imsg` wherever Homebrew or the PATH
+    /// put it.
+    private func connectToMessages(home: URL, number: String) {
         guard let executable = HermesACPSupport.executable(
             command: InstinctMessagesSupport.defaultCommand, home: home,
             searchPath: ProcessInfo.processInfo.environment["PATH"])
         else {
-            state = .failed(.notFound(InstinctMessagesSupport.defaultCommand))
+            state = .failed(.messagesToolMissing(InstinctMessagesSupport.defaultCommand))
             return
         }
         if state != .connecting { state = .connecting }
@@ -402,7 +460,9 @@ final class NotchHermesChatService: ObservableObject {
         }
         // The turn before this one is still writing; Hermes takes one prompt
         // at a time, so the message waits rather than being dropped.
-        if working, agent.holdsMessagesWhileWorking {
+        // VERTUS on this Mac takes one prompt at a time, so a message typed
+        // while it writes waits its turn; texts can follow each other freely.
+        if working, !carriesMessagesThread {
             heldMessage = words
             return
         }
@@ -614,6 +674,10 @@ final class NotchHermesChatService: ObservableObject {
         let text = strings(language)
         switch failure {
         case .notFound(let command): return text.notFound(command)
+        case .messagesToolMissing(let command):
+            // Instinct's page words its own; VERTUS's says texting needs it.
+            return agent == .instinct ? text.notFound(command)
+                : String(format: text.messagesToolMissingFormat, command)
         case .unreachable(let reason): return text.unreachable(reason)
         case .needsFullDiskAccess:
             let app = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? AppInfo.name

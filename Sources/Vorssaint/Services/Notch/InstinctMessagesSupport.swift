@@ -46,6 +46,8 @@ struct InstinctReactionEvent: Equatable {
 struct InstinctChatRecord: Equatable {
     let id: Int64
     let identifier: String
+    /// The contact or group name Messages shows, when it has one.
+    var name: String = ""
     let participants: [String]
     let isGroup: Bool
 }
@@ -69,6 +71,36 @@ enum InstinctMessagesSupport {
     /// Instinct is a hosted agent and can take a while, but a turn that has
     /// heard nothing for this long stops showing it is waiting.
     static let replyTimeout: TimeInterval = 600
+
+    // MARK: Which conversation
+
+    /// What carries a chat page's conversation.
+    enum Transport: Equatable {
+        /// The iMessage thread with this number.
+        case messages(number: String)
+        /// The page is only an iMessage thread, and has no number yet.
+        case missingNumber
+        /// The agent on this Mac (VERTUS's hub, or `hermes acp`).
+        case onThisMac
+    }
+
+    /// Instinct is only reachable by iMessage. VERTUS is texted at its
+    /// Photon line once its number is given, and otherwise spoken to on this
+    /// Mac exactly as before the number existed.
+    static func transport(messagesOnly: Bool, number: String?) -> Transport {
+        let number = (number ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !number.isEmpty { return .messages(number: number) }
+        return messagesOnly ? .missingNumber : .onThisMac
+    }
+
+    /// The saved conversation for each way of carrying it. The iMessage
+    /// thread replaces the transcript whenever it is read, so VERTUS's thread
+    /// keeps a file of its own: the conversation on this Mac is still there
+    /// when the number is cleared.
+    static func historyFile(base: String, transport: Transport) -> String {
+        guard case .messages = transport, base == "vertus-chat.json" else { return base }
+        return "vertus-imessage-chat.json"
+    }
 
     // MARK: Reading imsg
 
@@ -186,12 +218,28 @@ enum InstinctMessagesSupport {
         return InstinctChatRecord(
             id: id,
             identifier: object["identifier"] as? String ?? "",
+            name: (object["display_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? object["name"] as? String ?? "",
             participants: object["participants"] as? [String] ?? [],
             isGroup: object["is_group"] as? Bool ?? false)
     }
 
     static func chats(in output: String) -> [InstinctChatRecord] {
         output.split(whereSeparator: \.isNewline).compactMap { chat(fromLine: String($0)) }
+    }
+
+    /// The people texted most recently, to pick an agent's number from:
+    /// one-to-one threads only, each handle once, newest first as imsg
+    /// lists them.
+    static func recentContacts(in output: String, limit: Int = 8) -> [InstinctChatRecord] {
+        var seen = Set<String>()
+        return Array(chats(in: output).filter {
+            !$0.isGroup && !$0.identifier.isEmpty && seen.insert(normalizedHandle($0.identifier)).inserted
+        }.prefix(limit))
+    }
+
+    static func recentChatsArguments() -> [String] {
+        ["chats", "--limit", "25", "--json"]
     }
 
     /// `imsg` explains a database it cannot open in words, not a status of

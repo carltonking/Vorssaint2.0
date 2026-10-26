@@ -193,6 +193,7 @@ enum SettingsBackupSupport {
         DefaultsKey.notchCameraFitHeight,
         // Whom this person texts is private, and one Mac's Messages thread.
         DefaultsKey.notchInstinctNumber,
+        DefaultsKey.notchHermesChatNumber,
     ]
 
     /// The file's content: an envelope with the format version, the app

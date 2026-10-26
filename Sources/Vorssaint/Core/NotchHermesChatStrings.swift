@@ -53,6 +53,13 @@ struct NotchHermesChatStrings {
     var dictationDenied: String
     var dictationUnavailable: String
     var speakReplies: String
+    /// The number VERTUS texts from (a Photon line). With it the page is the
+    /// iMessage thread with VERTUS instead of a conversation on this Mac.
+    var number: String
+    var numberPlaceholder: String
+    var numberHint: String
+    var recentChats: String
+    var messagesToolMissingFormat: String
 
     func notFound(_ command: String) -> String { String(format: notFoundFormat, command) }
 
@@ -138,7 +145,12 @@ extension NotchHermesChatStrings {
         listening: "Listening…",
         dictationDenied: "Voice input needs Microphone and Speech Recognition access. Allow both in System Settings › Privacy & Security.",
         dictationUnavailable: "Speech recognition isn’t available on this Mac right now.",
-        speakReplies: "Read Replies Aloud"
+        speakReplies: "Read Replies Aloud",
+        number: "VERTUS number",
+        numberPlaceholder: "+1 555 123 4567",
+        numberHint: "The number you text VERTUS at (its Photon line). With it, this page is your iMessage thread with VERTUS; leave it empty to talk to VERTUS on this Mac. It stays on this Mac and is left out of settings backups.",
+        recentChats: "Recent Chats",
+        messagesToolMissingFormat: "Nothing runs at “%1$@”. Texting VERTUS from the island needs the imsg tool to read and send your iMessages."
     )
 
     static let ptBR = NotchHermesChatStrings(
@@ -186,7 +198,12 @@ extension NotchHermesChatStrings {
         listening: "Ouvindo…",
         dictationDenied: "A entrada por voz precisa de acesso ao Microfone e ao Reconhecimento de Fala. Permita os dois em Ajustes do Sistema › Privacidade e Segurança.",
         dictationUnavailable: "O reconhecimento de fala não está disponível neste Mac agora.",
-        speakReplies: "Ler respostas em voz alta"
+        speakReplies: "Ler respostas em voz alta",
+        number: "Número do VERTUS",
+        numberPlaceholder: "+55 11 91234 5678",
+        numberHint: "O número para o qual você manda mensagens ao VERTUS (a linha do Photon). Com ele, esta página é a sua conversa do iMessage com o VERTUS; deixe vazio para falar com o VERTUS neste Mac. Fica neste Mac e não entra nos backups de ajustes.",
+        recentChats: "Conversas recentes",
+        messagesToolMissingFormat: "Nada roda em “%1$@”. Mandar mensagens ao VERTUS pela ilha exige a ferramenta imsg para ler e enviar suas mensagens do iMessage."
     )
 
     static let es = NotchHermesChatStrings(
@@ -234,7 +251,12 @@ extension NotchHermesChatStrings {
         listening: "Escuchando…",
         dictationDenied: "La entrada de voz necesita acceso al Micrófono y al Reconocimiento de voz. Permite ambos en Ajustes del Sistema › Privacidad y seguridad.",
         dictationUnavailable: "El reconocimiento de voz no está disponible en este Mac ahora.",
-        speakReplies: "Leer respuestas en voz alta"
+        speakReplies: "Leer respuestas en voz alta",
+        number: "Número de VERTUS",
+        numberPlaceholder: "+34 612 34 56 78",
+        numberHint: "El número al que escribes a VERTUS (su línea de Photon). Con él, esta página es tu hilo de iMessage con VERTUS; déjalo vacío para hablar con VERTUS en este Mac. Se queda en este Mac y no entra en las copias de los ajustes.",
+        recentChats: "Chats recientes",
+        messagesToolMissingFormat: "No hay nada en “%1$@”. Escribir a VERTUS desde la isla necesita la herramienta imsg para leer y enviar tus iMessages."
     )
 
     static let sk = NotchHermesChatStrings(
@@ -282,7 +304,12 @@ extension NotchHermesChatStrings {
         listening: "Počúvam…",
         dictationDenied: "Hlasový vstup potrebuje prístup k mikrofónu a rozpoznávaniu reči. Povoľte oboje v Systémových nastaveniach › Súkromie a bezpečnosť.",
         dictationUnavailable: "Rozpoznávanie reči teraz nie je na tomto Macu dostupné.",
-        speakReplies: "Čítať odpovede nahlas"
+        speakReplies: "Čítať odpovede nahlas",
+        number: "Číslo VERTUS",
+        numberPlaceholder: "+421 912 345 678",
+        numberHint: "Číslo, na ktoré píšete VERTUS (jeho linka Photon). S ním je táto stránka vaše vlákno v iMessage s VERTUS; nechajte prázdne, ak chcete hovoriť s VERTUS na tomto Macu. Zostáva na tomto Macu a nie je súčasťou záloh nastavení.",
+        recentChats: "Nedávne konverzácie",
+        messagesToolMissingFormat: "Na „%1$@“ nič nebeží. Písanie VERTUS z ostrova potrebuje nástroj imsg na čítanie a odosielanie správ iMessage."
     )
 
     static let de = NotchHermesChatStrings(
@@ -330,7 +357,12 @@ extension NotchHermesChatStrings {
         listening: "Hört zu…",
         dictationDenied: "Spracheingabe braucht Zugriff auf Mikrofon und Spracherkennung. Erlaube beides in den Systemeinstellungen › Datenschutz & Sicherheit.",
         dictationUnavailable: "Spracherkennung ist auf diesem Mac gerade nicht verfügbar.",
-        speakReplies: "Antworten vorlesen"
+        speakReplies: "Antworten vorlesen",
+        number: "VERTUS-Nummer",
+        numberPlaceholder: "+49 151 23456789",
+        numberHint: "Die Nummer, an die du VERTUS schreibst (seine Photon-Leitung). Damit ist diese Seite dein iMessage-Verlauf mit VERTUS; leer lassen, um mit VERTUS auf diesem Mac zu sprechen. Sie bleibt auf diesem Mac und ist nicht Teil von Einstellungs-Backups.",
+        recentChats: "Letzte Chats",
+        messagesToolMissingFormat: "Unter „%1$@“ läuft nichts. Um VERTUS von der Insel aus zu schreiben, braucht es das Tool imsg zum Lesen und Senden deiner iMessages."
     )
 
     static let fr = NotchHermesChatStrings(
@@ -378,7 +410,12 @@ extension NotchHermesChatStrings {
         listening: "Écoute…",
         dictationDenied: "La saisie vocale nécessite l’accès au micro et à la reconnaissance vocale. Autorisez les deux dans Réglages Système › Confidentialité et sécurité.",
         dictationUnavailable: "La reconnaissance vocale n’est pas disponible sur ce Mac pour le moment.",
-        speakReplies: "Lire les réponses à voix haute"
+        speakReplies: "Lire les réponses à voix haute",
+        number: "Numéro de VERTUS",
+        numberPlaceholder: "+33 6 12 34 56 78",
+        numberHint: "Le numéro auquel vous écrivez à VERTUS (sa ligne Photon). Avec lui, cette page est votre fil iMessage avec VERTUS ; laissez-le vide pour parler à VERTUS sur ce Mac. Il reste sur ce Mac et n’est pas inclus dans les sauvegardes des réglages.",
+        recentChats: "Conversations récentes",
+        messagesToolMissingFormat: "Rien ne s’exécute à « %1$@ ». Écrire à VERTUS depuis l’île nécessite l’outil imsg pour lire et envoyer vos iMessages."
     )
 
     static let it = NotchHermesChatStrings(
@@ -426,7 +463,12 @@ extension NotchHermesChatStrings {
         listening: "In ascolto…",
         dictationDenied: "L’input vocale richiede l’accesso al microfono e al riconoscimento vocale. Consenti entrambi in Impostazioni di Sistema › Privacy e sicurezza.",
         dictationUnavailable: "Il riconoscimento vocale non è disponibile su questo Mac al momento.",
-        speakReplies: "Leggi le risposte ad alta voce"
+        speakReplies: "Leggi le risposte ad alta voce",
+        number: "Numero di VERTUS",
+        numberPlaceholder: "+39 312 345 6789",
+        numberHint: "Il numero a cui scrivi a VERTUS (la sua linea Photon). Con questo, la pagina è il tuo thread iMessage con VERTUS; lascialo vuoto per parlare con VERTUS su questo Mac. Resta su questo Mac ed è escluso dai backup delle impostazioni.",
+        recentChats: "Chat recenti",
+        messagesToolMissingFormat: "Non c’è niente in “%1$@”. Scrivere a VERTUS dall’isola richiede lo strumento imsg per leggere e inviare i tuoi iMessage."
     )
 
     static let ru = NotchHermesChatStrings(
@@ -474,7 +516,12 @@ extension NotchHermesChatStrings {
         listening: "Слушаю…",
         dictationDenied: "Для голосового ввода нужен доступ к микрофону и распознаванию речи. Разрешите оба в Системных настройках › Конфиденциальность и безопасность.",
         dictationUnavailable: "Распознавание речи сейчас недоступно на этом Mac.",
-        speakReplies: "Читать ответы вслух"
+        speakReplies: "Читать ответы вслух",
+        number: "Номер VERTUS",
+        numberPlaceholder: "+7 912 345-67-89",
+        numberHint: "Номер, на который вы пишете VERTUS (его линия Photon). С ним эта страница становится вашей перепиской с VERTUS в iMessage; оставьте пустым, чтобы говорить с VERTUS на этом Mac. Он остается на этом Mac и не попадает в резервные копии настроек.",
+        recentChats: "Недавние чаты",
+        messagesToolMissingFormat: "По пути «%1$@» ничего нет. Чтобы писать VERTUS с острова, нужен инструмент imsg для чтения и отправки ваших iMessage."
     )
 
     static let tr = NotchHermesChatStrings(
@@ -522,7 +569,12 @@ extension NotchHermesChatStrings {
         listening: "Dinleniyor…",
         dictationDenied: "Sesli giriş için Mikrofon ve Konuşma Tanıma erişimi gerekir. İkisine de Sistem Ayarları › Gizlilik ve Güvenlik’ten izin verin.",
         dictationUnavailable: "Konuşma tanıma şu anda bu Mac’te kullanılamıyor.",
-        speakReplies: "Yanıtları Sesli Oku"
+        speakReplies: "Yanıtları Sesli Oku",
+        number: "VERTUS numarası",
+        numberPlaceholder: "+90 532 123 45 67",
+        numberHint: "VERTUS’a yazdığınız numara (Photon hattı). Bununla bu sayfa, VERTUS ile iMessage yazışmanız olur; bu Mac’te VERTUS ile konuşmak için boş bırakın. Bu Mac’te kalır ve ayar yedeklerine dahil edilmez.",
+        recentChats: "Son Sohbetler",
+        messagesToolMissingFormat: "“%1$@” konumunda hiçbir şey çalışmıyor. Adadan VERTUS’a yazmak, iMessage’larınızı okumak ve göndermek için imsg aracını gerektirir."
     )
 
     static let ja = NotchHermesChatStrings(
@@ -570,7 +622,12 @@ extension NotchHermesChatStrings {
         listening: "聞き取り中…",
         dictationDenied: "音声入力にはマイクと音声認識へのアクセスが必要です。システム設定 › プライバシーとセキュリティで両方を許可してください。",
         dictationUnavailable: "このMacでは現在音声認識を利用できません。",
-        speakReplies: "返信を読み上げる"
+        speakReplies: "返信を読み上げる",
+        number: "VERTUSの番号",
+        numberPlaceholder: "+81 90-1234-5678",
+        numberHint: "VERTUSに送る番号（Photonの回線）。設定すると、このページはVERTUSとのiMessageのスレッドになります。このMacでVERTUSと話すには空のままにしてください。このMacにだけ保存され、設定のバックアップには含まれません。",
+        recentChats: "最近のチャット",
+        messagesToolMissingFormat: "“%1$@”には何もありません。アイランドからVERTUSにメッセージを送るには、iMessageを読んで送るimsgツールが必要です。"
     )
 
     static let ko = NotchHermesChatStrings(
@@ -618,7 +675,12 @@ extension NotchHermesChatStrings {
         listening: "듣는 중…",
         dictationDenied: "음성 입력에는 마이크와 음성 인식 접근 권한이 필요합니다. 시스템 설정 › 개인정보 보호 및 보안에서 둘 다 허용하세요.",
         dictationUnavailable: "지금 이 Mac에서는 음성 인식을 사용할 수 없습니다.",
-        speakReplies: "답장 소리 내어 읽기"
+        speakReplies: "답장 소리 내어 읽기",
+        number: "VERTUS 번호",
+        numberPlaceholder: "+82 10-1234-5678",
+        numberHint: "VERTUS에게 메시지를 보내는 번호(Photon 회선)입니다. 설정하면 이 페이지가 VERTUS와의 iMessage 대화가 되며, 이 Mac에서 VERTUS와 대화하려면 비워 두세요. 이 Mac에만 남고 설정 백업에는 포함되지 않습니다.",
+        recentChats: "최근 대화",
+        messagesToolMissingFormat: "“%1$@”에서 실행되는 것이 없습니다. 아일랜드에서 VERTUS에게 메시지를 보내려면 iMessage를 읽고 보내는 imsg 도구가 필요합니다."
     )
 
     static let uk = NotchHermesChatStrings(
@@ -666,7 +728,12 @@ extension NotchHermesChatStrings {
         listening: "Слухаю…",
         dictationDenied: "Для голосового введення потрібен доступ до мікрофона та розпізнавання мовлення. Дозвольте обидва в Системних параметрах › Приватність і безпека.",
         dictationUnavailable: "Розпізнавання мовлення зараз недоступне на цьому Mac.",
-        speakReplies: "Читати відповіді вголос"
+        speakReplies: "Читати відповіді вголос",
+        number: "Номер VERTUS",
+        numberPlaceholder: "+380 67 123 4567",
+        numberHint: "Номер, на який ви пишете VERTUS (його лінія Photon). З ним ця сторінка стає вашим листуванням із VERTUS в iMessage; залиште порожнім, щоб говорити з VERTUS на цьому Mac. Він лишається на цьому Mac і не потрапляє до резервних копій налаштувань.",
+        recentChats: "Нещодавні чати",
+        messagesToolMissingFormat: "За шляхом «%1$@» нічого немає. Щоб писати VERTUS з острова, потрібен інструмент imsg для читання й надсилання ваших iMessage."
     )
 
     static let zhHans = NotchHermesChatStrings(
@@ -714,7 +781,12 @@ extension NotchHermesChatStrings {
         listening: "正在聆听…",
         dictationDenied: "语音输入需要麦克风和语音识别权限。请在系统设置 › 隐私与安全性中同时允许。",
         dictationUnavailable: "此 Mac 当前无法使用语音识别。",
-        speakReplies: "朗读回复"
+        speakReplies: "朗读回复",
+        number: "VERTUS 号码",
+        numberPlaceholder: "+86 138 0013 8000",
+        numberHint: "你给 VERTUS 发消息所用的号码（它的 Photon 线路）。设置后，此页面就是你与 VERTUS 的 iMessage 对话；留空则在这台 Mac 上与 VERTUS 对话。它只保存在这台 Mac 上，不会包含在设置备份中。",
+        recentChats: "最近的对话",
+        messagesToolMissingFormat: "“%1$@”处没有可运行的内容。从岛中给 VERTUS 发消息需要 imsg 工具来读取和发送你的 iMessage。"
     )
 
     static let zhTW = NotchHermesChatStrings(
@@ -762,7 +834,12 @@ extension NotchHermesChatStrings {
         listening: "正在聆聽…",
         dictationDenied: "語音輸入需要麥克風和語音辨識權限。請在系統設定 › 隱私權與安全性中同時允許。",
         dictationUnavailable: "這台 Mac 目前無法使用語音辨識。",
-        speakReplies: "朗讀回覆"
+        speakReplies: "朗讀回覆",
+        number: "VERTUS 號碼",
+        numberPlaceholder: "+886 912 345 678",
+        numberHint: "你傳訊息給 VERTUS 所用的號碼（它的 Photon 線路）。設定後，此頁面就是你與 VERTUS 的 iMessage 對話；留空則在這台 Mac 上與 VERTUS 對話。它只保存在這台 Mac 上，不會包含在設定備份中。",
+        recentChats: "最近的對話",
+        messagesToolMissingFormat: "「%1$@」沒有可執行的項目。從島中傳訊息給 VERTUS 需要 imsg 工具來讀取和傳送你的 iMessage。"
     )
 
     static let zhHK = NotchHermesChatStrings(
@@ -810,6 +887,11 @@ extension NotchHermesChatStrings {
         listening: "正在聆聽…",
         dictationDenied: "語音輸入需要咪高風和語音辨識權限。請在系統設定 › 私隱與安全性中同時允許。",
         dictationUnavailable: "這部 Mac 目前無法使用語音辨識。",
-        speakReplies: "朗讀回覆"
+        speakReplies: "朗讀回覆",
+        number: "VERTUS 號碼",
+        numberPlaceholder: "+852 5123 4567",
+        numberHint: "你傳訊息給 VERTUS 所用的號碼（它的 Photon 線路）。設定後，此頁面就是你與 VERTUS 的 iMessage 對話；留空則在這部 Mac 上與 VERTUS 對話。它只保存在這部 Mac 上，不會包括在設定備份中。",
+        recentChats: "最近的對話",
+        messagesToolMissingFormat: "「%1$@」沒有可執行的項目。從島中傳訊息給 VERTUS 需要 imsg 工具來讀取和傳送你的 iMessage。"
     )
 }

@@ -10,7 +10,7 @@ import Foundation
 /// is still streaming in to settle.
 final class NotchHermesChatHistoryStore {
     private let queue: DispatchQueue
-    private let fileName: String
+    let fileName: String
     private let settle: TimeInterval = 1
     private var pending: DispatchWorkItem?
     private var latest: [NotchHermesChatMessage]?

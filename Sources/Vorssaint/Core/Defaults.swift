@@ -875,6 +875,10 @@ enum DefaultsKey {
     /// Reads each finished VERTUS reply aloud. A taste, not a property of
     /// the Mac, so it travels with a settings backup.
     static let notchHermesChatSpeakReplies = "notchHermesChatSpeakReplies"
+    /// The number VERTUS texts from (its Photon line). Set, the VERTUS page
+    /// is the iMessage thread with it; empty, it talks to VERTUS on this Mac.
+    /// Personal, so it never leaves this Mac in a settings backup.
+    static let notchHermesChatNumber = "notchHermesChatNumber"
     // Instinct: the iMessage thread with the hosted Instinct agent, read and
     // sent through the `imsg` tool, held by the island beside VERTUS.
     static let notchInstinctChatEnabled = "notchInstinctChatEnabled"
@@ -1520,6 +1524,8 @@ enum Defaults {
         // Silent until asked for: a reply read aloud in an open office is
         // a surprise nobody chose.
         DefaultsKey.notchHermesChatSpeakReplies: false,
+        // Empty: VERTUS on this Mac, as before the iMessage thread existed.
+        DefaultsKey.notchHermesChatNumber: "",
         // Off until asked for: the page reads the Messages database.
         DefaultsKey.notchInstinctChatEnabled: false,
         DefaultsKey.notchInstinctNumber: "",
