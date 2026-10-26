@@ -116,6 +116,23 @@ final class ScratchpadLiveStyler: NSObject, NSTextStorageDelegate, NSLayoutManag
     }
 
     var baseFont: NSFont { .systemFont(ofSize: baseSize) }
+
+    /// Obsidian's TeX colours, a shade deeper on a light pad so they still read.
+    static let mathCommand = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.98, green: 0.36, blue: 0.40, alpha: 1)
+            : NSColor(srgbRed: 0.80, green: 0.16, blue: 0.22, alpha: 1)
+    }
+    static let mathLetters = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.33, green: 0.80, blue: 0.80, alpha: 1)
+            : NSColor(srgbRed: 0.05, green: 0.52, blue: 0.55, alpha: 1)
+    }
+    static let mathNumber = NSColor(name: nil) { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(srgbRed: 0.95, green: 0.62, blue: 0.35, alpha: 1)
+            : NSColor(srgbRed: 0.75, green: 0.40, blue: 0.08, alpha: 1)
+    }
     var mutedColor: NSColor { Self.faded(textColor, 0.45) }
     var codeBackground: NSColor { Self.faded(textColor, 0.08) }
 
@@ -279,6 +296,18 @@ final class ScratchpadLiveStyler: NSObject, NSTextStorageDelegate, NSLayoutManag
             if element.content != element.range { add(.foregroundColor, Self.faded(textColor, 0.85), element.content) }
         } else {
             for range in element.hidden + element.drawn { add(.foregroundColor, mutedColor, range) }
+        }
+        // TeX being typed is coloured as Obsidian colours it: commands red,
+        // letters teal, numbers orange, brackets and scripts dimmed.
+        if case .math = element.kind {
+            for (range, token) in ScratchpadLiveMarkdown.mathTokens(in: storage.string, range: element.content) {
+                switch token {
+                case .command: add(.foregroundColor, Self.mathCommand, range)
+                case .letters: add(.foregroundColor, Self.mathLetters, range)
+                case .number: add(.foregroundColor, Self.mathNumber, range)
+                case .punctuation: add(.foregroundColor, mutedColor, range)
+                }
+            }
         }
     }
 

@@ -531,4 +531,20 @@ enum ScratchpadLiveMarkdown {
                               hidden: [NSRange(location: whole.location + 1, length: whole.length - 1)],
                               reveal: whole, replaced: NSRange(location: whole.location, length: 1))
     }
+
+    enum MathToken: Equatable { case command, letters, number, punctuation }
+
+    private static let mathToken = regex(#"(\\(?:[A-Za-z]+|.))|([A-Za-z]+)|([0-9]+(?:\.[0-9]+)?)|([{}()\[\]^_&|])"#)
+
+    /// The pieces of TeX source to colour while a formula shows as source.
+    static func mathTokens(in text: String, range: NSRange) -> [(NSRange, MathToken)] {
+        guard range.length > 0, NSMaxRange(range) <= (text as NSString).length else { return [] }
+        return mathToken.matches(in: text, range: range).compactMap { match in
+            let kinds: [MathToken] = [.command, .letters, .number, .punctuation]
+            for (index, kind) in kinds.enumerated() where match.range(at: index + 1).location != NSNotFound {
+                return (match.range, kind)
+            }
+            return nil
+        }
+    }
 }

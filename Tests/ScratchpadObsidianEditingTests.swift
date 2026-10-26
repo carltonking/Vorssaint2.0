@@ -113,6 +113,13 @@ enum ScratchpadObsidianEditingTests {
             let revealed = ScratchpadLiveMarkdown.hiddenCharacters(in: block, selections: [NSRange(location: 4, length: 0)])
             suite.expect(revealed.isEmpty, "the caret in it shows the source")
 
+            let source = "$$dsfsdf\\square(s)$$"
+            let tokens = ScratchpadLiveMarkdown.mathTokens(in: source, range: NSRange(location: 2, length: 16))
+                .map { ((source as NSString).substring(with: $0.0), $0.1) }
+            suite.expect(tokens.map(\.0) == ["dsfsdf", "\\square", "(", "s", ")"]
+                         && tokens.map(\.1) == [.letters, .command, .punctuation, .letters, .punctuation],
+                         "TeX source is coloured by commands, letters and brackets")
+
             let table = elements("| a | b |\n|---|:-:|\n| 1 | x\\|y |\nnext")
             suite.expect(table.first?.kind == .tableBlock(rows: [["a", "b"], ["1", "x|y"]]), "a table's cells")
             suite.expect(elements("| not | a table |").allSatisfy { if case .tableBlock = $0.kind { return false }; return true },
