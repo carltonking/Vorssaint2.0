@@ -45,6 +45,12 @@ struct NotchHermesChatStrings {
     let approvalExpired: String
     let reachedOut: String
     let reachedOutFormat: String
+    let dictate: String
+    let stopDictation: String
+    let listening: String
+    let dictationDenied: String
+    let dictationUnavailable: String
+    let speakReplies: String
 
     func notFound(_ command: String) -> String { String(format: notFoundFormat, command) }
 
@@ -124,7 +130,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Denied.",
         approvalExpired: "The request expired before an answer.",
         reachedOut: "VERTUS reached out",
-        reachedOutFormat: "VERTUS reached out · %1$@"
+        reachedOutFormat: "VERTUS reached out · %1$@",
+        dictate: "Dictate",
+        stopDictation: "Stop Dictating",
+        listening: "Listening…",
+        dictationDenied: "Voice input needs Microphone and Speech Recognition access. Allow both in System Settings › Privacy & Security.",
+        dictationUnavailable: "Speech recognition isn’t available on this Mac right now.",
+        speakReplies: "Read Replies Aloud"
     )
 
     static let ptBR = NotchHermesChatStrings(
@@ -166,7 +178,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Negado.",
         approvalExpired: "O pedido expirou antes de uma resposta.",
         reachedOut: "O VERTUS entrou em contato",
-        reachedOutFormat: "O VERTUS entrou em contato · %1$@"
+        reachedOutFormat: "O VERTUS entrou em contato · %1$@",
+        dictate: "Ditar",
+        stopDictation: "Parar de ditar",
+        listening: "Ouvindo…",
+        dictationDenied: "A entrada por voz precisa de acesso ao Microfone e ao Reconhecimento de Fala. Permita os dois em Ajustes do Sistema › Privacidade e Segurança.",
+        dictationUnavailable: "O reconhecimento de fala não está disponível neste Mac agora.",
+        speakReplies: "Ler respostas em voz alta"
     )
 
     static let es = NotchHermesChatStrings(
@@ -208,7 +226,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Denegado.",
         approvalExpired: "La solicitud caducó antes de una respuesta.",
         reachedOut: "VERTUS te escribió",
-        reachedOutFormat: "VERTUS te escribió · %1$@"
+        reachedOutFormat: "VERTUS te escribió · %1$@",
+        dictate: "Dictar",
+        stopDictation: "Dejar de dictar",
+        listening: "Escuchando…",
+        dictationDenied: "La entrada de voz necesita acceso al Micrófono y al Reconocimiento de voz. Permite ambos en Ajustes del Sistema › Privacidad y seguridad.",
+        dictationUnavailable: "El reconocimiento de voz no está disponible en este Mac ahora.",
+        speakReplies: "Leer respuestas en voz alta"
     )
 
     static let sk = NotchHermesChatStrings(
@@ -250,7 +274,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Zamietnuté.",
         approvalExpired: "Žiadosť vypršala skôr, než prišla odpoveď.",
         reachedOut: "VERTUS sa ozval",
-        reachedOutFormat: "VERTUS sa ozval · %1$@"
+        reachedOutFormat: "VERTUS sa ozval · %1$@",
+        dictate: "Diktovať",
+        stopDictation: "Zastaviť diktovanie",
+        listening: "Počúvam…",
+        dictationDenied: "Hlasový vstup potrebuje prístup k mikrofónu a rozpoznávaniu reči. Povoľte oboje v Systémových nastaveniach › Súkromie a bezpečnosť.",
+        dictationUnavailable: "Rozpoznávanie reči teraz nie je na tomto Macu dostupné.",
+        speakReplies: "Čítať odpovede nahlas"
     )
 
     static let de = NotchHermesChatStrings(
@@ -292,7 +322,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Abgelehnt.",
         approvalExpired: "Die Anfrage ist abgelaufen, bevor eine Antwort kam.",
         reachedOut: "VERTUS hat sich gemeldet",
-        reachedOutFormat: "VERTUS hat sich gemeldet · %1$@"
+        reachedOutFormat: "VERTUS hat sich gemeldet · %1$@",
+        dictate: "Diktieren",
+        stopDictation: "Diktat beenden",
+        listening: "Hört zu…",
+        dictationDenied: "Spracheingabe braucht Zugriff auf Mikrofon und Spracherkennung. Erlaube beides in den Systemeinstellungen › Datenschutz & Sicherheit.",
+        dictationUnavailable: "Spracherkennung ist auf diesem Mac gerade nicht verfügbar.",
+        speakReplies: "Antworten vorlesen"
     )
 
     static let fr = NotchHermesChatStrings(
@@ -334,7 +370,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Refusé.",
         approvalExpired: "La demande a expiré avant une réponse.",
         reachedOut: "VERTUS vous a écrit",
-        reachedOutFormat: "VERTUS vous a écrit · %1$@"
+        reachedOutFormat: "VERTUS vous a écrit · %1$@",
+        dictate: "Dicter",
+        stopDictation: "Arrêter la dictée",
+        listening: "Écoute…",
+        dictationDenied: "La saisie vocale nécessite l’accès au micro et à la reconnaissance vocale. Autorisez les deux dans Réglages Système › Confidentialité et sécurité.",
+        dictationUnavailable: "La reconnaissance vocale n’est pas disponible sur ce Mac pour le moment.",
+        speakReplies: "Lire les réponses à voix haute"
     )
 
     static let it = NotchHermesChatStrings(
@@ -376,7 +418,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Negato.",
         approvalExpired: "La richiesta è scaduta prima di una risposta.",
         reachedOut: "VERTUS ti ha scritto",
-        reachedOutFormat: "VERTUS ti ha scritto · %1$@"
+        reachedOutFormat: "VERTUS ti ha scritto · %1$@",
+        dictate: "Detta",
+        stopDictation: "Interrompi dettatura",
+        listening: "In ascolto…",
+        dictationDenied: "L’input vocale richiede l’accesso al microfono e al riconoscimento vocale. Consenti entrambi in Impostazioni di Sistema › Privacy e sicurezza.",
+        dictationUnavailable: "Il riconoscimento vocale non è disponibile su questo Mac al momento.",
+        speakReplies: "Leggi le risposte ad alta voce"
     )
 
     static let ru = NotchHermesChatStrings(
@@ -418,7 +466,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Запрещено.",
         approvalExpired: "Запрос истёк до ответа.",
         reachedOut: "VERTUS написал вам",
-        reachedOutFormat: "VERTUS написал вам · %1$@"
+        reachedOutFormat: "VERTUS написал вам · %1$@",
+        dictate: "Диктовать",
+        stopDictation: "Остановить диктовку",
+        listening: "Слушаю…",
+        dictationDenied: "Для голосового ввода нужен доступ к микрофону и распознаванию речи. Разрешите оба в Системных настройках › Конфиденциальность и безопасность.",
+        dictationUnavailable: "Распознавание речи сейчас недоступно на этом Mac.",
+        speakReplies: "Читать ответы вслух"
     )
 
     static let tr = NotchHermesChatStrings(
@@ -460,7 +514,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Reddedildi.",
         approvalExpired: "İstek yanıtlanmadan süresi doldu.",
         reachedOut: "VERTUS size yazdı",
-        reachedOutFormat: "VERTUS size yazdı · %1$@"
+        reachedOutFormat: "VERTUS size yazdı · %1$@",
+        dictate: "Dikte Et",
+        stopDictation: "Dikteyi Durdur",
+        listening: "Dinleniyor…",
+        dictationDenied: "Sesli giriş için Mikrofon ve Konuşma Tanıma erişimi gerekir. İkisine de Sistem Ayarları › Gizlilik ve Güvenlik’ten izin verin.",
+        dictationUnavailable: "Konuşma tanıma şu anda bu Mac’te kullanılamıyor.",
+        speakReplies: "Yanıtları Sesli Oku"
     )
 
     static let ja = NotchHermesChatStrings(
@@ -502,7 +562,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "拒否しました。",
         approvalExpired: "応答する前に依頼の期限が切れました。",
         reachedOut: "VERTUSから連絡がありました",
-        reachedOutFormat: "VERTUSから連絡がありました · %1$@"
+        reachedOutFormat: "VERTUSから連絡がありました · %1$@",
+        dictate: "音声入力",
+        stopDictation: "音声入力を停止",
+        listening: "聞き取り中…",
+        dictationDenied: "音声入力にはマイクと音声認識へのアクセスが必要です。システム設定 › プライバシーとセキュリティで両方を許可してください。",
+        dictationUnavailable: "このMacでは現在音声認識を利用できません。",
+        speakReplies: "返信を読み上げる"
     )
 
     static let ko = NotchHermesChatStrings(
@@ -544,7 +610,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "거부했습니다.",
         approvalExpired: "응답하기 전에 요청이 만료되었습니다.",
         reachedOut: "VERTUS가 먼저 연락했습니다",
-        reachedOutFormat: "VERTUS가 먼저 연락했습니다 · %1$@"
+        reachedOutFormat: "VERTUS가 먼저 연락했습니다 · %1$@",
+        dictate: "받아쓰기",
+        stopDictation: "받아쓰기 중지",
+        listening: "듣는 중…",
+        dictationDenied: "음성 입력에는 마이크와 음성 인식 접근 권한이 필요합니다. 시스템 설정 › 개인정보 보호 및 보안에서 둘 다 허용하세요.",
+        dictationUnavailable: "지금 이 Mac에서는 음성 인식을 사용할 수 없습니다.",
+        speakReplies: "답장 소리 내어 읽기"
     )
 
     static let uk = NotchHermesChatStrings(
@@ -586,7 +658,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "Заборонено.",
         approvalExpired: "Запит сплив до відповіді.",
         reachedOut: "VERTUS написав вам",
-        reachedOutFormat: "VERTUS написав вам · %1$@"
+        reachedOutFormat: "VERTUS написав вам · %1$@",
+        dictate: "Диктувати",
+        stopDictation: "Зупинити диктування",
+        listening: "Слухаю…",
+        dictationDenied: "Для голосового введення потрібен доступ до мікрофона та розпізнавання мовлення. Дозвольте обидва в Системних параметрах › Приватність і безпека.",
+        dictationUnavailable: "Розпізнавання мовлення зараз недоступне на цьому Mac.",
+        speakReplies: "Читати відповіді вголос"
     )
 
     static let zhHans = NotchHermesChatStrings(
@@ -628,7 +706,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "已拒绝。",
         approvalExpired: "请求在回复前已过期。",
         reachedOut: "VERTUS 主动联系了你",
-        reachedOutFormat: "VERTUS 主动联系了你 · %1$@"
+        reachedOutFormat: "VERTUS 主动联系了你 · %1$@",
+        dictate: "听写",
+        stopDictation: "停止听写",
+        listening: "正在聆听…",
+        dictationDenied: "语音输入需要麦克风和语音识别权限。请在系统设置 › 隐私与安全性中同时允许。",
+        dictationUnavailable: "此 Mac 当前无法使用语音识别。",
+        speakReplies: "朗读回复"
     )
 
     static let zhTW = NotchHermesChatStrings(
@@ -670,7 +754,13 @@ extension NotchHermesChatStrings {
         approvalDenied: "已拒絕。",
         approvalExpired: "請求在回覆前已過期。",
         reachedOut: "VERTUS 主動聯絡了你",
-        reachedOutFormat: "VERTUS 主動聯絡了你 · %1$@"
+        reachedOutFormat: "VERTUS 主動聯絡了你 · %1$@",
+        dictate: "聽寫",
+        stopDictation: "停止聽寫",
+        listening: "正在聆聽…",
+        dictationDenied: "語音輸入需要麥克風和語音辨識權限。請在系統設定 › 隱私權與安全性中同時允許。",
+        dictationUnavailable: "這台 Mac 目前無法使用語音辨識。",
+        speakReplies: "朗讀回覆"
     )
 
     static let zhHK = NotchHermesChatStrings(
@@ -712,6 +802,12 @@ extension NotchHermesChatStrings {
         approvalDenied: "已拒絕。",
         approvalExpired: "請求在回覆前已逾時。",
         reachedOut: "VERTUS 主動聯絡你",
-        reachedOutFormat: "VERTUS 主動聯絡你 · %1$@"
+        reachedOutFormat: "VERTUS 主動聯絡你 · %1$@",
+        dictate: "聽寫",
+        stopDictation: "停止聽寫",
+        listening: "正在聆聽…",
+        dictationDenied: "語音輸入需要咪高風和語音辨識權限。請在系統設定 › 私隱與安全性中同時允許。",
+        dictationUnavailable: "這部 Mac 目前無法使用語音辨識。",
+        speakReplies: "朗讀回覆"
     )
 }

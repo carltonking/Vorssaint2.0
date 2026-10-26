@@ -94,10 +94,15 @@ struct NotchHermesChatSettingsControls: View {
 struct NotchHermesChatView: View {
     let size: CGSize
     @ObservedObject private var chat = NotchHermesChatService.shared
+    @ObservedObject private var voice = NotchHermesVoiceService.shared
     @ObservedObject private var l10n = L10n.shared
     @AppStorage(DefaultsKey.notchHermesChatEnabled) private var enabled = false
+    @AppStorage(DefaultsKey.notchHermesChatSpeakReplies) private var speakReplies = false
     @Environment(\.notchSettingsPreview) private var preview
     @State private var draft = ""
+    /// What was typed before the microphone opened, kept in front of the
+    /// words heard so dictating adds to a message instead of replacing it.
+    @State private var typedBeforeDictation = ""
     @FocusState private var typing: Bool
     /// Replies finished before the page opened: only the ones after it make
     /// the companion cheer here.
@@ -129,15 +134,31 @@ struct NotchHermesChatView: View {
         // The island already holds the keyboard when it opens; the field takes
         // it so the first words typed are the message, as in the Command Bar.
         // A settings preview leaves the keyboard where it was.
-        .onAppear { if cheeredReplies == nil { cheeredReplies = chat.completedReplies } }
+        .onAppear {
+            if cheeredReplies == nil { cheeredReplies = chat.completedReplies }
+            voice.refreshAuthorization()
+        }
+        // The microphone never outlives the page that opened it.
+        .onDisappear { voice.cancelDictation() }
+        .onChange(of: voice.heard) { _, words in
+            guard voice.phase == .listening else { return }
+            draft = NotchHermesVoiceSupport.draft(typed: typedBeforeDictation, dictated: words)
+        }
         .task {
             guard !preview else { return }
             try? await Task.sleep(for: .milliseconds(80))
             typing = true
         }
         .notchBand(leading: { status }, trailing: {
-            NotchIconButton(symbol: "trash", title: text.clear) { chat.clear() }
-                .disabled(chat.messages.isEmpty && chat.reply.isEmpty)
+            HStack(spacing: 2) {
+                NotchIconButton(symbol: speakReplies ? "speaker.wave.2.fill" : "speaker.slash",
+                                title: text.speakReplies, selected: speakReplies) {
+                    speakReplies.toggle()
+                    if !speakReplies { NotchHermesVoiceService.existing?.stopSpeaking() }
+                }
+                NotchIconButton(symbol: "trash", title: text.clear) { chat.clear() }
+                    .disabled(chat.messages.isEmpty && chat.reply.isEmpty)
+            }
         })
     }
 
@@ -293,13 +314,19 @@ struct NotchHermesChatView: View {
 
     private var composer: some View {
         HStack(spacing: 8) {
-            TextField(text.placeholder, text: $draft, axis: .vertical)
+            TextField(listening ? text.listening : text.placeholder, text: $draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .font(.system(size: 12))
                 .lineLimit(1...3)
                 .focused($typing)
                 .onSubmit(submit)
                 .accessibilityLabel(text.placeholder)
+            NotchIconButton(symbol: listening ? "mic.fill" : "mic",
+                            title: listening ? text.stopDictation : text.dictate,
+                            selected: listening, action: toggleDictation)
+                // Refused once, the system will not ask again: the note in
+                // the conversation says where to allow it.
+                .disabled(preview || voice.phase == .denied || voice.phase == .requesting)
             if chat.working {
                 NotchIconButton(symbol: "stop.fill", title: text.stop) { chat.cancel() }
             } else {
@@ -316,9 +343,26 @@ struct NotchHermesChatView: View {
         draft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
+    private var listening: Bool { voice.phase == .listening }
+
+    /// Press to talk, press again (or pause) to send what was heard, as if
+    /// it had been typed.
+    private func toggleDictation() {
+        if voice.phase == .idle { typedBeforeDictation = draft }
+        let typed = typedBeforeDictation
+        voice.toggleDictation { words in
+            draft = ""
+            chat.send(NotchHermesVoiceSupport.draft(typed: typed, dictated: words))
+            typing = true
+        }
+    }
+
     private func submit() {
         let words = trimmedDraft
         guard !words.isEmpty else { return }
+        // Sent by hand mid-dictation: the microphone closes without sending
+        // the same words a second time.
+        voice.cancelDictation()
         draft = ""
         chat.send(words)
         typing = true
