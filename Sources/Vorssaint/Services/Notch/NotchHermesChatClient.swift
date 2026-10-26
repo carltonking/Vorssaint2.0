@@ -51,6 +51,18 @@ final class NotchHermesChatClient {
         case turnFailed(String)
         /// The conversation cannot go on; the text is why.
         case failed(String)
+        /// The conversation as the other side keeps it (Instinct's Messages
+        /// thread, which the phone writes to as well), oldest first.
+        case thread([NotchHermesChatMessage])
+        /// A message of the person's as the other side recorded it: one sent
+        /// from the island coming back, or one sent from another device.
+        case delivered(NotchHermesChatMessage)
+        /// A whole message from the agent, rather than a streamed reply. The
+        /// service decides whether it answers a turn or arrived unasked.
+        case received(NotchHermesChatMessage)
+        /// The conversation lives where this app may not read without Full
+        /// Disk Access (the Messages database).
+        case needsFullDiskAccess
 
         /// What a failed start reads as when the server said nothing.
         static let unreachable = "VERTUS did not answer."

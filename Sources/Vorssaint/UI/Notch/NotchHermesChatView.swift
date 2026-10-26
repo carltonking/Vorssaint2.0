@@ -89,10 +89,7 @@ struct NotchHermesChatSettingsControls: View {
     }
 
     private func message(_ failure: NotchHermesChatService.Failure) -> String {
-        switch failure {
-        case .notFound(let command): return text.notFound(command)
-        case .unreachable(let reason): return text.unreachable(reason)
-        }
+        chat.describe(failure, language: l10n.language)
     }
 }
 
@@ -100,13 +97,16 @@ struct NotchHermesChatSettingsControls: View {
 /// sends the next message. Hermes decides what tools to use; the island only
 /// carries the words, and refuses the commands it would have to approve
 /// unseen.
+///
+/// The same page carries Instinct's iMessage thread (`chat: .instinct`), with
+/// previews under the links Instinct sends.
 struct NotchHermesChatView: View {
     let size: CGSize
-    @ObservedObject private var chat = NotchHermesChatService.shared
+    @ObservedObject private var chat: NotchHermesChatService
     @ObservedObject private var voice = NotchHermesVoiceService.shared
     @ObservedObject private var l10n = L10n.shared
-    @AppStorage(DefaultsKey.notchHermesChatEnabled) private var enabled = false
-    @AppStorage(DefaultsKey.notchHermesChatSpeakReplies) private var speakReplies = false
+    @AppStorage private var enabled: Bool
+    @AppStorage private var speakReplies: Bool
     @Environment(\.notchSettingsPreview) private var preview
     @State private var draft = ""
     /// What was typed before the microphone opened, kept in front of the
@@ -116,7 +116,18 @@ struct NotchHermesChatView: View {
     /// Replies finished before the page opened: only the ones after it make
     /// the companion cheer here.
     @State private var cheeredReplies: Int?
-    private var text: NotchHermesChatStrings { FeatureStrings.notchHermesChat(l10n.language) }
+    private var text: NotchHermesChatStrings { chat.strings(l10n.language) }
+
+    init(size: CGSize, chat: NotchHermesChatService = .shared) {
+        self.size = size
+        _chat = ObservedObject(wrappedValue: chat)
+        _enabled = AppStorage(wrappedValue: false, chat.agent.enabledKey)
+        _speakReplies = AppStorage(wrappedValue: false, chat.agent.speakRepliesKey)
+    }
+
+    /// Links Instinct sends open as cards; VERTUS's replies keep their links
+    /// inline, as they always have.
+    private var previewsLinks: Bool { chat.agent == .instinct }
 
     private static let bottomID = "hermes-bottom"
 
@@ -214,8 +225,11 @@ struct NotchHermesChatView: View {
             NotchHermesChatBubble(words: message.text, mine: true, text: text) { draft = message.text; typing = true }
                 .accessibilityLabel("\(text.you): \(message.text)")
         case .hermes:
-            NotchHermesChatBubble(words: message.text, mine: false, text: text)
-                .accessibilityLabel("\(text.title): \(message.text)")
+            VStack(alignment: .leading, spacing: 6) {
+                NotchHermesChatBubble(words: message.text, mine: false, text: text)
+                    .accessibilityLabel("\(text.title): \(message.text)")
+                linkCards(message.text)
+            }
         case .tool:
             Label(message.text, systemImage: "wrench.and.screwdriver")
                 .font(.system(size: 10.5))
@@ -235,9 +249,19 @@ struct NotchHermesChatView: View {
                     .foregroundStyle(.white.opacity(0.55))
                     .lineLimit(1)
                 NotchHermesChatBubble(words: message.text, mine: false, text: text)
+                linkCards(message.text)
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("\(text.reachedOut(message.source)): \(message.text)")
+        }
+    }
+
+    /// A card under each web link an agent's message carries, in order.
+    @ViewBuilder private func linkCards(_ words: String) -> some View {
+        if previewsLinks {
+            ForEach(NotchLinkPreviewService.shared.links(in: words), id: \.self) { url in
+                NotchLinkPreviewCard(url: url, openTitle: FeatureStrings.notchInstinctChat(l10n.language).openLink)
+            }
         }
     }
 
@@ -275,26 +299,35 @@ struct NotchHermesChatView: View {
     @ViewBuilder private var opening: some View {
         if case .failed(let failure) = chat.state {
             NotchEmptyView(symbol: "exclamationmark.triangle", message: message(failure)) {
-                NotchPillButton(title: text.retry, prominent: true) { chat.retry() }
+                HStack(spacing: 6) {
+                    // Messages cannot be read until the grant is given; the
+                    // list it lives in is one click away.
+                    if failure == .needsFullDiskAccess {
+                        NotchPillButton(title: FeatureStrings.notchInstinctChat(l10n.language).openFullDiskAccess) {
+                            Permissions.shared.requestFullDiskAccess()
+                        }
+                    }
+                    NotchPillButton(title: text.retry, prominent: true) { chat.retry() }
+                }
             }
         } else if !enabled && !preview {
-            NotchEmptyView(symbol: NotchModule.hermesChat.symbol, message: text.emptyTitle, mark: Self.mark)
+            NotchEmptyView(symbol: symbol, message: text.emptyTitle, mark: mark)
         } else if case .connecting = chat.state {
-            NotchEmptyView(symbol: NotchModule.hermesChat.symbol, message: text.connecting, mark: Self.mark)
+            NotchEmptyView(symbol: symbol, message: text.connecting, mark: mark)
         } else {
-            NotchEmptyView(symbol: NotchModule.hermesChat.symbol, message: text.emptySubtitle, mark: Self.mark)
+            NotchEmptyView(symbol: symbol, message: text.emptySubtitle, mark: mark)
         }
     }
 
     private func message(_ failure: NotchHermesChatService.Failure) -> String {
-        switch failure {
-        case .notFound(let command): return text.notFound(command)
-        case .unreachable(let reason): return text.unreachable(reason)
-        }
+        chat.describe(failure, language: l10n.language)
     }
 
+    private var symbol: String { chat.agent.module.symbol }
+
     /// VERTUS's own mark where the page would otherwise show a chat glyph.
-    private static let mark = AnyView(VertusMark().fill(style: FillStyle(eoFill: true)))
+    private var mark: AnyView? { chat.agent == .vertus ? Self.vertusMark : nil }
+    private static let vertusMark = AnyView(VertusMark().fill(style: FillStyle(eoFill: true)))
 
     // MARK: Band and composer
 
@@ -359,7 +392,7 @@ struct NotchHermesChatView: View {
     private func toggleDictation() {
         if voice.phase == .idle { typedBeforeDictation = draft }
         let typed = typedBeforeDictation
-        voice.toggleDictation { words in
+        voice.toggleDictation(in: chat) { words in
             draft = ""
             chat.send(NotchHermesVoiceSupport.draft(typed: typed, dictated: words))
             typing = true

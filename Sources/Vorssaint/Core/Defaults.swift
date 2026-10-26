@@ -875,6 +875,15 @@ enum DefaultsKey {
     /// Reads each finished VERTUS reply aloud. A taste, not a property of
     /// the Mac, so it travels with a settings backup.
     static let notchHermesChatSpeakReplies = "notchHermesChatSpeakReplies"
+    // Instinct: the iMessage thread with the hosted Instinct agent, read and
+    // sent through the `imsg` tool, held by the island beside VERTUS.
+    static let notchInstinctChatEnabled = "notchInstinctChatEnabled"
+    /// The phone number or address Instinct texts from. Personal, so it
+    /// never leaves this Mac in a settings backup.
+    static let notchInstinctNumber = "notchInstinctNumber"
+    static let notchInstinctShortcutEnabled = "notchInstinctShortcutEnabled"
+    static let notchInstinctShortcut = "notchInstinctShortcut"
+    static let notchInstinctSpeakReplies = "notchInstinctSpeakReplies"
     static let notchCalendarEnabled = "notchCalendarEnabled"
     static let notchCalendarCountdown = "notchCalendarCountdown"
     static let notchCalendarTimeLeft = "notchCalendarTimeLeft" // the event under way counts down to its end
@@ -1511,6 +1520,12 @@ enum Defaults {
         // Silent until asked for: a reply read aloud in an open office is
         // a surprise nobody chose.
         DefaultsKey.notchHermesChatSpeakReplies: false,
+        // Off until asked for: the page reads the Messages database.
+        DefaultsKey.notchInstinctChatEnabled: false,
+        DefaultsKey.notchInstinctNumber: "",
+        DefaultsKey.notchInstinctShortcutEnabled: true,
+        DefaultsKey.notchInstinctShortcut: GlobalShortcut.instinctChatDefault.storageValue,
+        DefaultsKey.notchInstinctSpeakReplies: false,
         DefaultsKey.notchEnabled: false,
         DefaultsKey.notchDisplay: NotchDisplay.automatic.rawValue,
         DefaultsKey.notchSilhouette: NotchSilhouette.capsule.rawValue,

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import Carbon.HIToolbox
 import Foundation
 
 /// The island's Hermes conversation is a protocol translation, so its edges
@@ -26,6 +27,7 @@ enum NotchHermesChatTests {
         routineReplyContracts(suite)
         reachOutContracts(suite)
         voiceContracts(suite)
+        instinctContracts(suite)
     }
 
     /// Talking to VERTUS: the microphone's states, when a pause ends a
@@ -429,10 +431,14 @@ enum NotchHermesChatTests {
             (try? String(contentsOfFile: path, encoding: .utf8)) ?? ""
         }
         let service = source("Sources/Vorssaint/Services/Notch/NotchHermesChatService.swift")
-        suite.expect(service.contains("AppFeature.notchHermesChat.isAvailable")
-                     && service.contains("UserDefaults.standard.bool(forKey: DefaultsKey.notchHermesChatEnabled)")
+        suite.expect(service.contains("case .vertus: return AppFeature.notchHermesChat")
+                     && service.contains("case .vertus: return DefaultsKey.notchHermesChatEnabled")
+                     && service.contains("case .instinct: return AppFeature.notchInstinctChat")
+                     && service.contains("case .instinct: return DefaultsKey.notchInstinctChatEnabled")
+                     && service.contains("agent.feature.isAvailable")
+                     && service.contains("UserDefaults.standard.bool(forKey: agent.enabledKey)")
                      && service.contains("AppFeature.notch.isAvailable"),
-                     "the agent only runs while the feature, its switch and the island are on")
+                     "each agent only runs while its feature, its switch and the island are on")
         suite.expect(service.contains("client?.end()"),
                      "turning the feature off ends the agent process")
         suite.expect(service.contains("HermesACPSupport.executable(")
@@ -443,6 +449,9 @@ enum NotchHermesChatTests {
         suite.expect(runtime.contains(".notchHermesChat: {")
                      && runtime.contains("NotchHermesChatService.shared.syncWithPreferences()"),
                      "the feature runtime owns the conversation's lifetime")
+        suite.expect(runtime.contains(".notchInstinctChat: {")
+                     && runtime.contains("NotchHermesChatService.instinct.syncWithPreferences()"),
+                     "the feature runtime owns the Instinct thread's lifetime")
 
         let support = source("Sources/Vorssaint/Services/Notch/NotchSupport.swift")
         suite.expect(support.contains("case .hermesChat: return AppFeature.notchHermesChat.isAvailable(in: defaults)"),
@@ -914,5 +923,150 @@ enum NotchHermesChatTests {
         let merged = NotchHermesChatHistory.restored(saved: Array(lines.prefix(2)), current: [lines[1], early])
         suite.expect(merged == [lines[0], lines[1], early],
                      "saved lines come first, a line already saved is not repeated, new ones follow")
+    }
+
+    // MARK: Instinct
+
+    /// Instinct's page is the Messages thread with its number, read through
+    /// `imsg`. What `imsg` prints, which thread is Instinct's however the
+    /// number was typed, and which links get cards are pinned here without
+    /// reading a real Messages database or sending anything.
+    private static func instinctContracts(_ suite: TestSuite) {
+        typealias Support = InstinctMessagesSupport
+        func line(id: Int, guid: String, fromMe: Bool, text: String, at time: String,
+                  chat: String = "+15551234567", group: Bool = false) -> String {
+            let object: [String: Any] = [
+                "id": id, "guid": guid, "is_from_me": fromMe, "sender": fromMe ? "+19990001111" : chat,
+                "text": text, "created_at": time, "chat_id": 7, "chat_identifier": chat,
+                "participants": [chat], "is_group": group, "attachments": [] as [Any],
+            ]
+            let data = try? JSONSerialization.data(withJSONObject: object)
+            return data.flatMap { String(data: $0, encoding: .utf8) } ?? ""
+        }
+        let first = "11111111-2222-3333-4444-555555555555"
+        let second = "66666666-7777-8888-9999-AAAAAAAAAAAA"
+        // History prints newest first, with a warning line in the output.
+        let history = [
+            line(id: 12, guid: second, fromMe: false, text: "Sure, here: https://example.com/a", at: "2026-10-26T12:11:01.354Z"),
+            "warning: something imsg logged",
+            line(id: 11, guid: first, fromMe: true, text: "Find me a cafe", at: "2026-10-26T12:10:00Z"),
+            line(id: 10, guid: "attachment-only", fromMe: false, text: "\u{FFFC}", at: "2026-10-26T12:09:00Z"),
+        ].joined(separator: "\n")
+        let records = Support.records(in: history)
+        suite.expect(records.map(\.rowID) == [11, 12],
+                     "imsg history reads oldest first, skips stray lines and messages without words")
+        suite.expect(records.first?.fromMe == true && records.last?.fromMe == false
+                     && records.last?.text == "Sure, here: https://example.com/a",
+                     "a message keeps who sent it and its words")
+        let repeated = history + "\n" + line(id: 12, guid: second, fromMe: false,
+                                             text: "Sure, here: https://example.com/a", at: "2026-10-26T12:11:01.354Z")
+        suite.expect(Support.records(in: repeated).count == 2, "a message printed twice is one message")
+        let messages = records.map { Support.message($0) }
+        suite.expect(messages.map(\.role) == [.person, .hermes]
+                     && messages.first?.id == UUID(uuidString: first)
+                     && records.first.map { Support.message($0).id } == messages.first?.id,
+                     "a message's identity is its Messages guid, the same every time it is read")
+        suite.expect(Support.stableID("p:0/odd-guid") == Support.stableID("p:0/odd-guid")
+                     && Support.stableID("p:0/odd-guid") != Support.stableID("p:1/odd-guid"),
+                     "a guid that is not a UUID still gives one lasting identity")
+
+        // Matching the number across the ways it is typed.
+        for typed in ["+1 (555) 123-4567", "555-123-4567", "5551234567", "tel:+15551234567", "+15551234567"] {
+            suite.expect(Support.sameHandle(typed, "+15551234567"), "\(typed) is Instinct's number")
+        }
+        suite.expect(!Support.sameHandle("+15551234568", "+15551234567")
+                     && !Support.sameHandle("1234567", "+15551234567")
+                     && !Support.sameHandle("", "+15551234567"),
+                     "another number, a short tail, or nothing is not Instinct")
+        suite.expect(Support.sameHandle("Instinct@Example.com ", "mailto:instinct@example.com")
+                     && !Support.sameHandle("instinct@example.com", "other@example.com"),
+                     "an address matches without regard to case")
+        let chats = Support.chats(in: [
+            #"{"id":3,"identifier":"chat123","participants":["+15551234567","+15550000000"],"is_group":true}"#,
+            #"{"id":5,"identifier":"+15551234567","participants":["+15551234567"],"is_group":false}"#,
+        ].joined(separator: "\n"))
+        suite.expect(Support.chat(for: "(555) 123-4567", in: chats)?.id == 5,
+                     "Instinct's thread is its one-to-one conversation, never a group it is in")
+        let groupLine = Support.record(fromLine: line(id: 20, guid: UUID().uuidString, fromMe: false,
+                                                      text: "group", at: "2026-10-26T12:00:00Z", group: true))
+        let otherLine = Support.record(fromLine: line(id: 21, guid: UUID().uuidString, fromMe: false,
+                                                      text: "someone else", at: "2026-10-26T12:00:00Z",
+                                                      chat: "+15559999999"))
+        suite.expect(records.allSatisfy { Support.belongs($0, to: "555 123 4567") }
+                     && groupLine.map { !Support.belongs($0, to: "+15551234567") } == true
+                     && otherLine.map { !Support.belongs($0, to: "+15551234567") } == true,
+                     "both sides of Instinct's thread belong to it; groups and other people do not")
+
+        // Links.
+        let links = Support.links(in: "See https://example.com/a and www.apple.com, then https://example.com/a again. Call tel:5551234567 or mail me@example.com")
+        suite.expect(links.map(\.absoluteString) == ["https://example.com/a", "http://www.apple.com"],
+                     "web links come in order, once each; phone numbers and addresses are not pages")
+        suite.expect(Support.links(in: "no links here").isEmpty, "words without links have no cards")
+
+        // Turns and reaching out.
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        suite.expect(!Support.isUnprompted(waiting: true, lastAnswer: nil, at: now),
+                     "a message while a turn waits is its answer")
+        suite.expect(!Support.isUnprompted(waiting: false, lastAnswer: now, at: now.addingTimeInterval(30)),
+                     "a second message right behind the answer is still the answer")
+        suite.expect(Support.isUnprompted(waiting: false, lastAnswer: now, at: now.addingTimeInterval(600))
+                     && Support.isUnprompted(waiting: false, lastAnswer: nil, at: now),
+                     "a message nobody asked for reaches out")
+
+        // The thread replaces the page's copy, keeping its own notes and marks.
+        if messages.count == 2 {
+            let reachedOut = NotchHermesChatMessage(id: messages[1].id, role: .proactive, text: messages[1].text,
+                                                    date: messages[1].date)
+            let lateNote = NotchHermesChatMessage(role: .note, text: "Stopped.",
+                                                  date: messages[1].date.addingTimeInterval(5))
+            let staleNote = NotchHermesChatMessage(role: .note, text: "old",
+                                                   date: messages[0].date.addingTimeInterval(-60))
+            let local = NotchHermesChatMessage(role: .person, text: "Find me a cafe", date: messages[0].date)
+            let merged = Support.merged(thread: messages, current: [staleNote, local, reachedOut, lateNote])
+            suite.expect(merged.map(\.id) == [messages[0].id, messages[1].id, lateNote.id]
+                         && merged[1].role == .proactive,
+                         "the thread replaces the saved copy; a newer note and the reached-out mark stay")
+            suite.expect(Support.merged(thread: [], current: [local]) == [local],
+                         "an empty thread leaves the page as it was")
+        } else {
+            suite.expect(false, "the history fixture reads as two messages")
+        }
+
+        // Reading failures and commands.
+        suite.expect(Support.isUnreadable("unable to open database file (code: 14)\nrequires Full Disk Access permission")
+                     && !Support.isUnreadable("no such table: chat (code: 1)"),
+                     "a Messages database this app may not read asks for Full Disk Access")
+        suite.expect(Support.sendArguments(number: " +15551234567 ", text: "hi; rm -rf ~")
+                     == ["send", "--to", "+15551234567", "--text", "hi; rm -rf ~"],
+                     "a message goes to imsg as one argument, never through a shell")
+        suite.expect(Support.watchArguments(chatID: 5, number: "+15551234567", after: 12)
+                     == ["watch", "--json", "--chat-id", "5", "--since-rowid", "12"]
+                     && Support.watchArguments(chatID: nil, number: "+15551234567", after: nil)
+                     == ["watch", "--json", "--participants", "+15551234567"],
+                     "the watch follows the known thread after the last message, or the number before there is one")
+
+        // Settings.
+        let commandShiftL = GlobalShortcut(keyCode: Int64(kVK_ANSI_L), modifiers: [.command, .shift])
+        suite.expect(GlobalShortcut.instinctChatDefault == commandShiftL
+                     && Defaults.registeredDefaults[DefaultsKey.notchInstinctShortcut] as? String
+                        == commandShiftL.storageValue
+                     && GlobalShortcut.instinctChatDefault != GlobalShortcut.vertusChatDefault,
+                     "Instinct opens with ⇧⌘L by default, apart from VERTUS's ⇧⌘K")
+        suite.expect(SettingsBackupSupport.machineStateKeys.contains(DefaultsKey.notchInstinctNumber),
+                     "Instinct's number never leaves this Mac in a settings backup")
+        suite.expect(Defaults.registeredDefaults[DefaultsKey.notchInstinctChatEnabled] as? Bool == false
+                     && AppFeature.notchInstinctChat.enabledKeys == [DefaultsKey.notchInstinctChatEnabled]
+                     && AppFeature.notchInstinctChat.permissions == [.fullDiskAccess]
+                     && !AppFeature.notchInstinctChat.installedByDefault
+                     && AppFeature.notchInstinctChat.group == .dynamicIsland,
+                     "Instinct is an opt-in island page that says it reads Messages")
+        for language in AppLanguage.allCases {
+            let words = FeatureStrings.notchInstinctChat(language)
+            let page = words.chat(FeatureStrings.notchHermesChat(language))
+            suite.expect(page.title == "Instinct" && page.placeholder == words.placeholder
+                         && !page.placeholder.contains("VERTUS") && !page.emptySubtitle.contains("VERTUS")
+                         && words.fullDiskAccess("Vorssaint (Developer)").contains("Vorssaint (Developer)"),
+                         "the Instinct page names Instinct, not VERTUS, in \(language.rawValue)")
+        }
     }
 }

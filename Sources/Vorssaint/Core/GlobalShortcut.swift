@@ -227,6 +227,9 @@ struct GlobalShortcut: Equatable, Hashable {
     // VERTUS QuickBar's ⇧⌘J opens its own panel.
     static let vertusChatDefault = GlobalShortcut(keyCode: Int64(kVK_ANSI_K),
                                                   modifiers: [.command, .shift])
+    // L, beside VERTUS's K on the same layer (⇧⌘I is taken on this Mac).
+    static let instinctChatDefault = GlobalShortcut(keyCode: Int64(kVK_ANSI_L),
+                                                    modifiers: [.command, .shift])
     // L for library (S already belongs to the sound output switcher), on the
     // same free control-option-command layer.
     static let snippetLibraryDefault = GlobalShortcut(keyCode: Int64(kVK_ANSI_L),
@@ -729,6 +732,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
     case pointerNextDisplay
     case notch
     case vertusChat
+    case instinctChat
 
     var id: String { storageKey }
 
@@ -765,6 +769,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .pointerNextDisplay: return DefaultsKey.pointerDisplayShortcut
         case .notch: return DefaultsKey.notchShortcut
         case .vertusChat: return DefaultsKey.notchHermesChatShortcut
+        case .instinctChat: return DefaultsKey.notchInstinctShortcut
         }
     }
 
@@ -801,6 +806,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .pointerNextDisplay: return .pointerNextDisplayDefault
         case .notch: return .notchDefault
         case .vertusChat: return .vertusChatDefault
+        case .instinctChat: return .instinctChatDefault
         }
     }
 
@@ -866,6 +872,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .pointerNextDisplay: return PointerDisplayStrings.localized(L10n.shared.language).title
         case .notch: return FeatureStrings.notch(L10n.shared.language).title
         case .vertusChat: return FeatureStrings.notchHermesChat(L10n.shared.language).title
+        case .instinctChat: return FeatureStrings.notchInstinctChat(L10n.shared.language).title
         }
     }
 
@@ -925,6 +932,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .pointerNextDisplay: return [DefaultsKey.pointerDisplayEnabled]
         case .notch: return [DefaultsKey.notchEnabled, DefaultsKey.notchShortcutEnabled]
         case .vertusChat: return [DefaultsKey.notchEnabled, DefaultsKey.notchHermesChatEnabled, DefaultsKey.notchHermesChatShortcutEnabled]
+        case .instinctChat: return [DefaultsKey.notchEnabled, DefaultsKey.notchInstinctChatEnabled, DefaultsKey.notchInstinctShortcutEnabled]
         }
     }
 
@@ -958,6 +966,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .pointerNextDisplay: return .windowLayout
         case .notch: return .notch
         case .vertusChat: return .notchHermesChat
+        case .instinctChat: return .notchInstinctChat
         }
     }
 

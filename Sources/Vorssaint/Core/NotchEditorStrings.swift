@@ -73,6 +73,7 @@ struct NotchEditorStrings {
     let agentsSummary: String
     let watchSummary: String
     let hermesChatSummary: String
+    let instinctChatSummary: String
 
     func enableFeature(_ title: String) -> String { String(format: enableFeatureFormat, title) }
     func enableSetting(_ title: String) -> String { String(format: enableSettingFormat, title) }
@@ -98,6 +99,7 @@ struct NotchEditorStrings {
         case .agents: return agentsSummary
         case .watch: return watchSummary
         case .hermesChat: return hermesChatSummary
+        case .instinctChat: return instinctChatSummary
         }
     }
 }
@@ -174,7 +176,8 @@ extension FeatureStrings {
             scratchpadSummary: "Your Obsidian notes, edited in place.",
             agentsSummary: "Claude Code, Codex, OpenCode and GitHub Copilot usage, limits and costs.",
             watchSummary: "Any part of a window, read live, with an alert when it changes.",
-            hermesChatSummary: "A chat with VERTUS, running on this Mac."
+            hermesChatSummary: "A chat with VERTUS, running on this Mac.",
+            instinctChatSummary: "Your iMessage thread with Instinct."
         )
         case .ptBR: return NotchEditorStrings(
             layout: "Layout",
@@ -245,7 +248,8 @@ extension FeatureStrings {
             scratchpadSummary: "Suas notas do Obsidian, editadas no lugar.",
             agentsSummary: "Uso, limites e custos do Claude Code, do Codex, do OpenCode e do GitHub Copilot.",
             watchSummary: "Qualquer parte de uma janela, lida ao vivo, com aviso quando mudar.",
-            hermesChatSummary: "Uma conversa com o VERTUS, rodando neste Mac."
+            hermesChatSummary: "Uma conversa com o VERTUS, rodando neste Mac.",
+            instinctChatSummary: "Sua conversa do iMessage com o Instinct."
         )
         case .es: return NotchEditorStrings(
             layout: "Diseño",
@@ -316,7 +320,8 @@ extension FeatureStrings {
             scratchpadSummary: "Tus notas de Obsidian, editadas en su sitio.",
             agentsSummary: "Uso, límites y costes de Claude Code, Codex, OpenCode y GitHub Copilot.",
             watchSummary: "Cualquier parte de una ventana, leída en directo, con aviso cuando cambie.",
-            hermesChatSummary: "Una conversación con VERTUS, que se ejecuta en este Mac."
+            hermesChatSummary: "Una conversación con VERTUS, que se ejecuta en este Mac.",
+            instinctChatSummary: "Tu conversación de iMessage con Instinct."
         )
         case .sk: return NotchEditorStrings(
             layout: "Rozloženie",
@@ -387,7 +392,8 @@ extension FeatureStrings {
             scratchpadSummary: "Vaše poznámky Obsidian, upravované na mieste.",
             agentsSummary: "Využitie, limity a náklady Claude Code, Codexu, OpenCode a GitHub Copilot.",
             watchSummary: "Ľubovoľná časť okna čítaná naživo s upozornením, keď sa zmení.",
-            hermesChatSummary: "Chat s VERTUS, ktorý beží na tomto Macu."
+            hermesChatSummary: "Chat s VERTUS, ktorý beží na tomto Macu.",
+            instinctChatSummary: "Vaša konverzácia s Instinctom v iMessage."
         )
         case .de: return NotchEditorStrings(
             layout: "Layout",
@@ -458,7 +464,8 @@ extension FeatureStrings {
             scratchpadSummary: "Deine Obsidian-Notizen, direkt bearbeitet.",
             agentsSummary: "Nutzung, Limits und Kosten von Claude Code, Codex, OpenCode und GitHub Copilot.",
             watchSummary: "Ein beliebiger Teil eines Fensters, live gelesen, mit Hinweis bei Änderungen.",
-            hermesChatSummary: "Ein Chat mit VERTUS, der auf diesem Mac läuft."
+            hermesChatSummary: "Ein Chat mit VERTUS, der auf diesem Mac läuft.",
+            instinctChatSummary: "Dein iMessage-Verlauf mit Instinct."
         )
         case .fr: return NotchEditorStrings(
             layout: "Disposition",
@@ -529,7 +536,8 @@ extension FeatureStrings {
             scratchpadSummary: "Vos notes Obsidian, modifiées sur place.",
             agentsSummary: "Utilisation, limites et coûts de Claude Code, Codex, OpenCode et GitHub Copilot.",
             watchSummary: "N’importe quelle partie d’une fenêtre, lue en direct, avec une alerte quand elle change.",
-            hermesChatSummary: "Une conversation avec VERTUS, qui tourne sur ce Mac."
+            hermesChatSummary: "Une conversation avec VERTUS, qui tourne sur ce Mac.",
+            instinctChatSummary: "Votre conversation iMessage avec Instinct."
         )
         case .it: return NotchEditorStrings(
             layout: "Layout",
@@ -600,7 +608,8 @@ extension FeatureStrings {
             scratchpadSummary: "Le tue note di Obsidian, modificate sul posto.",
             agentsSummary: "Uso, limiti e costi di Claude Code, Codex, OpenCode e GitHub Copilot.",
             watchSummary: "Qualsiasi parte di una finestra, letta dal vivo, con un avviso quando cambia.",
-            hermesChatSummary: "Una chat con VERTUS, in esecuzione su questo Mac."
+            hermesChatSummary: "Una chat con VERTUS, in esecuzione su questo Mac.",
+            instinctChatSummary: "La tua conversazione iMessage con Instinct."
         )
         case .ru: return NotchEditorStrings(
             layout: "Макет",
@@ -671,7 +680,8 @@ extension FeatureStrings {
             scratchpadSummary: "Ваши заметки Obsidian, прямо на месте.",
             agentsSummary: "Использование, лимиты и стоимость Claude Code, Codex, OpenCode и GitHub Copilot.",
             watchSummary: "Любая часть окна, читаемая вживую, с оповещением об изменениях.",
-            hermesChatSummary: "Чат с VERTUS, запущенным на этом Mac."
+            hermesChatSummary: "Чат с VERTUS, запущенным на этом Mac.",
+            instinctChatSummary: "Ваша переписка с Instinct в iMessage."
         )
         case .tr: return NotchEditorStrings(
             layout: "Yerleşim",
@@ -742,7 +752,8 @@ extension FeatureStrings {
             scratchpadSummary: "Obsidian notlarınız, yerinde düzenlenir.",
             agentsSummary: "Claude Code, Codex, GitHub Copilot ve OpenCode kullanımı, sınırları ve maliyetleri.",
             watchSummary: "Bir pencerenin herhangi bir bölümü, canlı okunur ve değişince haber verilir.",
-            hermesChatSummary: "Bu Mac’te çalışan VERTUS ile sohbet."
+            hermesChatSummary: "Bu Mac’te çalışan VERTUS ile sohbet.",
+            instinctChatSummary: "Instinct ile iMessage yazışmanız."
         )
         case .ja: return NotchEditorStrings(
             layout: "レイアウト",
@@ -813,7 +824,8 @@ extension FeatureStrings {
             scratchpadSummary: "Obsidianのノートをその場で編集。",
             agentsSummary: "Claude Code、Codex、OpenCode、GitHub Copilotの使用量、上限、コスト。",
             watchSummary: "ウインドウの好きな部分をライブで読み取り、変化したら知らせます。",
-            hermesChatSummary: "このMacで動くVERTUSとのチャット。"
+            hermesChatSummary: "このMacで動くVERTUSとのチャット。",
+            instinctChatSummary: "InstinctとのiMessageのスレッド。"
         )
         case .ko: return NotchEditorStrings(
             layout: "레이아웃",
@@ -884,7 +896,8 @@ extension FeatureStrings {
             scratchpadSummary: "Obsidian 노트를 제자리에서 편집.",
             agentsSummary: "Claude Code, Codex, OpenCode, GitHub Copilot의 사용량, 한도, 비용.",
             watchSummary: "윈도우의 원하는 부분을 실시간으로 읽고 바뀌면 알려 줍니다.",
-            hermesChatSummary: "이 Mac에서 실행되는 VERTUS와의 채팅."
+            hermesChatSummary: "이 Mac에서 실행되는 VERTUS와의 채팅.",
+            instinctChatSummary: "Instinct와의 iMessage 대화."
         )
         case .zhHans: return NotchEditorStrings(
             layout: "布局",
@@ -955,7 +968,8 @@ extension FeatureStrings {
             scratchpadSummary: "直接编辑你的 Obsidian 笔记。",
             agentsSummary: "Claude Code、Codex、OpenCode 和 GitHub Copilot 的用量、限额和费用。",
             watchSummary: "实时读取窗口的任意部分，变化时提醒你。",
-            hermesChatSummary: "与运行在这台 Mac 上的 VERTUS 对话。"
+            hermesChatSummary: "与运行在这台 Mac 上的 VERTUS 对话。",
+            instinctChatSummary: "你与 Instinct 的 iMessage 对话。"
         )
         case .zhTW: return NotchEditorStrings(
             layout: "佈局",
@@ -1026,7 +1040,8 @@ extension FeatureStrings {
             scratchpadSummary: "直接編輯你的 Obsidian 筆記。",
             agentsSummary: "Claude Code、Codex、OpenCode 和 GitHub Copilot 的用量、限額和費用。",
             watchSummary: "即時讀取視窗的任何部分，變化時提醒你。",
-            hermesChatSummary: "與執行在這台 Mac 上的 VERTUS 對話。"
+            hermesChatSummary: "與執行在這台 Mac 上的 VERTUS 對話。",
+            instinctChatSummary: "你與 Instinct 的 iMessage 對話。"
         )
         case .zhHK: return NotchEditorStrings(
             layout: "佈局",
@@ -1097,7 +1112,8 @@ extension FeatureStrings {
             scratchpadSummary: "直接編輯你的 Obsidian 筆記。",
             agentsSummary: "Claude Code、Codex、OpenCode 和 GitHub Copilot 的用量、限額和費用。",
             watchSummary: "即時讀取視窗的任何部分，變化時提醒你。",
-            hermesChatSummary: "與運行於這台 Mac 的 VERTUS 對話。"
+            hermesChatSummary: "與運行於這台 Mac 的 VERTUS 對話。",
+            instinctChatSummary: "你與 Instinct 的 iMessage 對話。"
         )
         case .uk: return NotchEditorStrings(
             layout: "Розкладка",
@@ -1168,7 +1184,8 @@ extension FeatureStrings {
             scratchpadSummary: "Ваші нотатки Obsidian, просто на місці.",
             agentsSummary: "Використання Claude Code, Codex, OpenCode і GitHub Copilot, ліміти й витрати.",
             watchSummary: "Будь-яка частина вікна, яку читають наживо, зі сповіщенням про зміни.",
-            hermesChatSummary: "Чат із VERTUS, що працює на цьому Mac."
+            hermesChatSummary: "Чат із VERTUS, що працює на цьому Mac.",
+            instinctChatSummary: "Ваше листування з Instinct в iMessage."
         )
         }
     }
