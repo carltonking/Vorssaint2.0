@@ -15,6 +15,31 @@ struct InstinctMessageRecord: Equatable {
     let chatIdentifier: String?
     let participants: [String]
     let isGroup: Bool
+    /// The tapbacks on it, as Messages holds them now.
+    var reactions: [NotchHermesChatMessage.Reaction] = []
+    /// The message it answers inline (`thread_originator_guid`). Not
+    /// `reply_to_guid`, which imsg sets on every message to the one before.
+    var replyToGuid: String? = nil
+}
+
+/// A tapback arriving on the watch: Messages stores it as a row of its own
+/// pointing at the message it sits on, and `imsg watch --reactions` prints it
+/// as one.
+struct InstinctReactionEvent: Equatable {
+    let rowID: Int64
+    let guid: String
+    /// The message the tapback sits on.
+    let targetGuid: String
+    /// Missing on some removals: a removal takes that side's tapback away
+    /// whatever it was.
+    let emoji: String?
+    let fromMe: Bool
+    let sender: String
+    let chatIdentifier: String?
+    let participants: [String]
+    let isGroup: Bool
+    /// False when the tapback was taken back.
+    let added: Bool
 }
 
 /// One conversation as `imsg chats --json` prints it.
@@ -52,10 +77,14 @@ enum InstinctMessagesSupport {
               let rowID = int64(object["id"]),
               let guid = object["guid"] as? String, !guid.isEmpty
         else { return nil }
+        // A tapback's row carries words ("Reacted 🚀 to …") but is not a
+        // message; it is read as a reaction instead.
+        guard object["is_reaction"] as? Bool != true else { return nil }
         let text = cleaned(object["text"] as? String ?? "")
-        // An attachment alone, a tapback or an edit record has no words to
-        // show; the thread on the phone is where those are seen.
+        // An attachment alone or an edit record has no words to show; the
+        // thread on the phone is where those are seen.
         guard !text.isEmpty else { return nil }
+        let originator = (object["thread_originator_guid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         return InstinctMessageRecord(
             rowID: rowID,
             guid: guid,
@@ -65,7 +94,80 @@ enum InstinctMessagesSupport {
             date: date(object["created_at"] as? String) ?? Date(timeIntervalSince1970: 0),
             chatIdentifier: object["chat_identifier"] as? String,
             participants: object["participants"] as? [String] ?? [],
-            isGroup: object["is_group"] as? Bool ?? false)
+            isGroup: object["is_group"] as? Bool ?? false,
+            reactions: reactions(object["reactions"]),
+            replyToGuid: originator)
+    }
+
+    static func reaction(fromLine line: String) -> InstinctReactionEvent? {
+        guard let object = jsonObject(line), object["is_reaction"] as? Bool == true,
+              let rowID = int64(object["id"]),
+              let target = object["reacted_to_guid"] as? String, !target.isEmpty
+        else { return nil }
+        let type = object["reaction_type"] as? String
+        return InstinctReactionEvent(
+            rowID: rowID,
+            guid: object["guid"] as? String ?? "",
+            targetGuid: target,
+            emoji: emoji(object["reaction_emoji"] as? String, type: type),
+            fromMe: object["is_from_me"] as? Bool ?? false,
+            sender: object["sender"] as? String ?? "",
+            chatIdentifier: object["chat_identifier"] as? String,
+            participants: object["participants"] as? [String] ?? [],
+            isGroup: object["is_group"] as? Bool ?? false,
+            added: object["is_reaction_add"] as? Bool ?? true)
+    }
+
+    /// The tapbacks a message carries in imsg's `reactions` list.
+    static func reactions(_ value: Any?) -> [NotchHermesChatMessage.Reaction] {
+        guard let list = value as? [[String: Any]] else { return [] }
+        var kept: [NotchHermesChatMessage.Reaction] = []
+        for item in list {
+            guard let emoji = emoji(item["emoji"] as? String, type: item["type"] as? String) else { continue }
+            let reaction = NotchHermesChatMessage.Reaction(emoji: emoji, fromMe: item["is_from_me"] as? Bool ?? false)
+            // One per side, the later one winning, as Messages shows it.
+            kept.removeAll { $0.fromMe == reaction.fromMe }
+            kept.append(reaction)
+        }
+        return kept
+    }
+
+    /// The classic tapbacks are named rather than given as an emoji.
+    static func emoji(_ given: String?, type: String?) -> String? {
+        if let given = given?.trimmingCharacters(in: .whitespacesAndNewlines), !given.isEmpty { return given }
+        switch type?.lowercased() {
+        case "love": return "❤️"
+        case "like": return "👍"
+        case "dislike": return "👎"
+        case "laugh": return "😂"
+        case "emphasize", "emphasis": return "‼️"
+        case "question": return "❓"
+        default: return nil
+        }
+    }
+
+    /// A tapback put on (or taken off) a message in the transcript. Each side
+    /// holds one tapback per message, so a new one replaces that side's last.
+    static func applying(_ event: InstinctReactionEvent,
+                         to messages: [NotchHermesChatMessage]) -> [NotchHermesChatMessage] {
+        let target = stableID(event.targetGuid)
+        guard let index = messages.firstIndex(where: { $0.id == target }) else { return messages }
+        var reactions = messages[index].reactions ?? []
+        reactions.removeAll { $0.fromMe == event.fromMe }
+        if event.added, let emoji = event.emoji {
+            reactions.append(NotchHermesChatMessage.Reaction(emoji: emoji, fromMe: event.fromMe))
+        }
+        var updated = messages
+        updated[index].reactions = reactions.isEmpty ? nil : reactions
+        return updated
+    }
+
+    /// Whether a tapback belongs to the thread with Instinct.
+    static func belongs(_ event: InstinctReactionEvent, to number: String) -> Bool {
+        guard !event.isGroup else { return false }
+        if let identifier = event.chatIdentifier, sameHandle(identifier, number) { return true }
+        if event.participants.count == 1, sameHandle(event.participants[0], number) { return true }
+        return !event.fromMe && sameHandle(event.sender, number)
     }
 
     /// Every message in a command's output, oldest first and each once,
@@ -168,7 +270,9 @@ enum InstinctMessagesSupport {
         -> NotchHermesChatMessage {
         NotchHermesChatMessage(id: stableID(record.guid),
                                role: role ?? (record.fromMe ? .person : .hermes),
-                               text: record.text, date: record.date)
+                               text: record.text, date: record.date,
+                               reactions: record.reactions.isEmpty ? nil : record.reactions,
+                               replyTo: record.replyToGuid.map(stableID))
     }
 
     /// The thread as Messages has it, in place of whatever the page held: the
@@ -183,7 +287,7 @@ enum InstinctMessagesSupport {
         let known = Set(thread.map(\.id))
         let lines = thread.map { line -> NotchHermesChatMessage in
             guard line.role == .hermes, roles[line.id] == .proactive else { return line }
-            return NotchHermesChatMessage(id: line.id, role: .proactive, text: line.text, date: line.date)
+            return line.with(role: .proactive)
         }
         let after = current.filter { $0.role == .note && $0.date > last && !known.contains($0.id) }
         return HermesACPSupport.trimmed(lines + after)
@@ -225,7 +329,8 @@ enum InstinctMessagesSupport {
     /// The live stream: the known conversation when there is one, else the
     /// number, which also catches the thread the first message creates.
     static func watchArguments(chatID: Int64?, number: String, after rowID: Int64?) -> [String] {
-        var arguments = ["watch", "--json"]
+        // Tapbacks arrive as rows of their own, printed only when asked for.
+        var arguments = ["watch", "--json", "--reactions"]
         if let chatID { arguments += ["--chat-id", String(chatID)] }
         else { arguments += ["--participants", number.trimmingCharacters(in: .whitespacesAndNewlines)] }
         if let rowID { arguments += ["--since-rowid", String(rowID)] }

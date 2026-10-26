@@ -294,19 +294,41 @@ struct NotchHermesChatMessage: Identifiable, Equatable, Codable {
         case proactive
     }
 
+    /// A tapback someone put on a message, as Messages shows it on the
+    /// bubble's corner. Each side holds at most one per message.
+    struct Reaction: Equatable, Codable {
+        let emoji: String
+        let fromMe: Bool
+    }
+
     let id: UUID
     let role: Role
     var text: String
     let date: Date
     /// The routine that wrote a proactive message, when the hub named it.
     let source: String?
+    /// Tapbacks on this message (Instinct's Messages thread only). Optional
+    /// so a history saved before they existed still reads.
+    var reactions: [Reaction]?
+    /// The message this one answers inline, when it was sent as a reply to
+    /// a particular message rather than to the thread.
+    var replyTo: UUID?
 
-    init(id: UUID = UUID(), role: Role, text: String, date: Date = Date(), source: String? = nil) {
+    init(id: UUID = UUID(), role: Role, text: String, date: Date = Date(), source: String? = nil,
+         reactions: [Reaction]? = nil, replyTo: UUID? = nil) {
         self.id = id
         self.role = role
         self.text = text
         self.date = date
         self.source = source
+        self.reactions = reactions
+        self.replyTo = replyTo
+    }
+
+    /// The same message under another role, keeping everything it carries.
+    func with(role: Role) -> NotchHermesChatMessage {
+        NotchHermesChatMessage(id: id, role: role, text: text, date: date, source: source,
+                               reactions: reactions, replyTo: replyTo)
     }
 }
 

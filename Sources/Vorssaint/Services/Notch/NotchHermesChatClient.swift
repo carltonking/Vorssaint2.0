@@ -60,6 +60,8 @@ final class NotchHermesChatClient {
         /// A whole message from the agent, rather than a streamed reply. The
         /// service decides whether it answers a turn or arrived unasked.
         case received(NotchHermesChatMessage)
+        /// A tapback put on, or taken off, a message of the thread.
+        case reacted(InstinctReactionEvent)
         /// The conversation lives where this app may not read without Full
         /// Disk Access (the Messages database).
         case needsFullDiskAccess

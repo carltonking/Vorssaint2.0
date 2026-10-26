@@ -186,6 +186,12 @@ final class NotchInstinctMessagesClient: NotchAgentChatTransport {
     }
 
     private func handle(_ line: String) {
+        if let reaction = Support.reaction(fromLine: line) {
+            guard Support.belongs(reaction, to: number), seen.insert(reaction.guid).inserted else { return }
+            lastRowID = max(lastRowID ?? reaction.rowID, reaction.rowID)
+            emit(.reacted(reaction))
+            return
+        }
         guard let record = Support.record(fromLine: line) else {
             let words = line.trimmingCharacters(in: .whitespaces)
             if !words.isEmpty { watchNoise = String((watchNoise + "\n" + words).suffix(2_000)) }

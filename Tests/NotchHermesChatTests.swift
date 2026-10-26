@@ -24,6 +24,7 @@ enum NotchHermesChatTests {
         approvalContracts(suite)
         historyContracts(suite)
         instinctSendContracts(suite)
+        instinctReactionContracts(suite)
         silenceContracts(suite)
         routineReplyContracts(suite)
         reachOutContracts(suite)
@@ -1041,9 +1042,9 @@ enum NotchHermesChatTests {
                      == ["send", "--to", "+15551234567", "--text", "hi; rm -rf ~"],
                      "a message goes to imsg as one argument, never through a shell")
         suite.expect(Support.watchArguments(chatID: 5, number: "+15551234567", after: 12)
-                     == ["watch", "--json", "--chat-id", "5", "--since-rowid", "12"]
+                     == ["watch", "--json", "--reactions", "--chat-id", "5", "--since-rowid", "12"]
                      && Support.watchArguments(chatID: nil, number: "+15551234567", after: nil)
-                     == ["watch", "--json", "--participants", "+15551234567"],
+                     == ["watch", "--json", "--reactions", "--participants", "+15551234567"],
                      "the watch follows the known thread after the last message, or the number before there is one")
 
         // Settings.
@@ -1078,5 +1079,83 @@ enum NotchHermesChatTests {
         suite.expect(InstinctMessagesSupport.probablySent(unsure), "an unconfirmed but accepted send counts as sent")
         suite.expect(!InstinctMessagesSupport.probablySent("Error: chat.db is not readable"),
                      "a real failure is still a failure")
+    }
+
+    /// Tapbacks and inline replies as imsg prints them (shapes taken from a
+    /// real thread): a tapback rides on the message it sits on in history and
+    /// arrives as a row of its own on the watch; an inline reply names the
+    /// message it answers in `thread_originator_guid`, while `reply_to_guid`
+    /// (set on every message, to the one before) means nothing.
+    private static func instinctReactionContracts(_ suite: TestSuite) {
+        typealias Support = InstinctMessagesSupport
+        let mine = "3DFC4364-753B-434A-B145-A786BDC50AD5"
+        let previous = "867940EA-D771-4F5F-8A95-EBD26CC2F9BF"
+        let reacted = #"{"id":189214,"guid":"\#(mine)","is_from_me":true,"sender":"+16506309054","text":"yes. can you react","created_at":"2026-10-26T13:07:38.060Z","chat_identifier":"+16506309054","participants":["+16506309054"],"is_group":false,"reply_to_guid":"\#(previous)","reactions":[{"id":189215,"is_from_me":false,"emoji":"🚀","type":"custom","sender":"+16506309054","created_at":"2026-10-26T13:07:44.099Z"}]}"#
+        let reply = #"{"id":189216,"guid":"7F487477-3E38-49E8-A5F9-1C03648A8812","is_from_me":false,"sender":"+16506309054","text":"Reply and react","created_at":"2026-10-26T13:07:45.327Z","chat_identifier":"+16506309054","participants":["+16506309054"],"is_group":false,"reply_to_guid":"5E95AADC-2A65-46C4-A4B7-22FFED12B0B2","thread_originator_guid":"\#(mine)","thread_originator_part":"0:0:66","reactions":[]}"#
+        let tapback = #"{"id":189215,"guid":"5E95AADC-2A65-46C4-A4B7-22FFED12B0B2","is_reaction":true,"is_reaction_add":true,"reaction_emoji":"🚀","reaction_type":"custom","reacted_to_guid":"\#(mine)","is_from_me":false,"sender":"+16506309054","text":"Reacted 🚀 to “yes. can you react”","created_at":"2026-10-26T13:07:44.099Z","chat_identifier":"+16506309054","participants":["+16506309054"],"is_group":false,"reactions":[]}"#
+
+        let records = Support.records(in: [reply, reacted].joined(separator: "\n"))
+        let messages = records.map { Support.message($0) }
+        guard messages.count == 2 else {
+            suite.expect(false, "the tapback fixture reads as two messages")
+            return
+        }
+        suite.expect(messages[0].reactions == [.init(emoji: "🚀", fromMe: false)] && messages[0].replyTo == nil,
+                     "a tapback on a message shows on it; reply_to_guid alone is not an inline reply")
+        suite.expect(messages[1].replyTo == Support.stableID(mine) && messages[1].reactions == nil,
+                     "an inline reply points at the message it answers")
+        suite.expect(Support.record(fromLine: tapback) == nil,
+                     "a tapback's own row is never shown as a message")
+        let event = Support.reaction(fromLine: tapback)
+        suite.expect(event?.targetGuid == mine && event?.emoji == "🚀" && event?.added == true
+                     && event.map { Support.belongs($0, to: "(650) 630-9054") } == true,
+                     "the watch's tapback row names its message, emoji and thread")
+        suite.expect(Support.reaction(fromLine: reply) == nil, "a message is not a tapback")
+
+        // Live updates by guid.
+        let bare = messages.map { line -> NotchHermesChatMessage in
+            var copy = line
+            copy.reactions = nil
+            return copy
+        }
+        if let event {
+            let added = Support.applying(event, to: bare)
+            suite.expect(added[0].reactions == [.init(emoji: "🚀", fromMe: false)] && added[1] == bare[1],
+                         "a tapback arriving later lands on its message and nowhere else")
+            let swapped = tapback.replacingOccurrences(of: "\"reaction_emoji\":\"🚀\"", with: "\"reaction_emoji\":\"\"")
+                .replacingOccurrences(of: "\"reaction_type\":\"custom\"", with: "\"reaction_type\":\"love\"")
+            if let love = Support.reaction(fromLine: swapped) {
+                suite.expect(Support.applying(love, to: added)[0].reactions == [.init(emoji: "❤️", fromMe: false)],
+                             "a classic tapback reads as its emoji and replaces that side's earlier one")
+            } else {
+                suite.expect(false, "a classic tapback row reads")
+            }
+            let removal = tapback.replacingOccurrences(of: "\"is_reaction_add\":true", with: "\"is_reaction_add\":false")
+            if let taken = Support.reaction(fromLine: removal) {
+                suite.expect(Support.applying(taken, to: added)[0].reactions == nil,
+                             "a tapback taken back leaves the message bare")
+            } else {
+                suite.expect(false, "a removed tapback row reads")
+            }
+            let elsewhere = tapback.replacingOccurrences(of: mine, with: UUID().uuidString)
+            suite.expect(Support.reaction(fromLine: elsewhere).map { Support.applying($0, to: bare) } == bare,
+                         "a tapback on a message the page does not hold changes nothing")
+        }
+        suite.expect(Support.merged(thread: messages, current: [bare[0], bare[1].with(role: .proactive)])
+                        .map(\.role) == [.person, .proactive]
+                     && Support.merged(thread: messages, current: [])[1].replyTo == Support.stableID(mine),
+                     "reading the thread again keeps the reached-out mark, the tapbacks and the reply")
+
+        // Saved history: the new fields travel, and a file from before them reads.
+        let back = NotchHermesChatHistory.encode(messages).map(NotchHermesChatHistory.decode) ?? []
+        // Compared without dates: the file keeps whole seconds.
+        suite.expect(back.map(\.id) == messages.map(\.id) && back.map(\.reactions) == messages.map(\.reactions)
+                     && back.map(\.replyTo) == messages.map(\.replyTo),
+                     "tapbacks and inline replies survive a relaunch")
+        let old = #"{"version":1,"messages":[{"id":"\#(UUID().uuidString)","role":"hermes","text":"from before","date":"2026-10-01T00:00:00Z"}]}"#
+        let oldLines = NotchHermesChatHistory.decode(Data(old.utf8))
+        suite.expect(oldLines.count == 1 && oldLines.first?.text == "from before"
+                     && oldLines.first?.reactions == nil && oldLines.first?.replyTo == nil,
+                     "a history saved before tapbacks and replies existed still reads")
     }
 }

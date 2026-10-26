@@ -222,11 +222,17 @@ struct NotchHermesChatView: View {
     @ViewBuilder private func row(_ message: NotchHermesChatMessage) -> some View {
         switch message.role {
         case .person:
-            NotchHermesChatBubble(words: message.text, mine: true, text: text) { draft = message.text; typing = true }
-                .accessibilityLabel("\(text.you): \(message.text)")
+            VStack(alignment: .trailing, spacing: 3) {
+                quote(message, mine: true)
+                NotchHermesChatBubble(words: message.text, mine: true, text: text,
+                                      reactions: message.reactions ?? []) { draft = message.text; typing = true }
+                    .accessibilityLabel("\(text.you): \(message.text)")
+            }
         case .hermes:
             VStack(alignment: .leading, spacing: 6) {
-                NotchHermesChatBubble(words: message.text, mine: false, text: text)
+                quote(message, mine: false)
+                NotchHermesChatBubble(words: message.text, mine: false, text: text,
+                                      reactions: message.reactions ?? [])
                     .accessibilityLabel("\(text.title): \(message.text)")
                 linkCards(message.text)
             }
@@ -248,12 +254,39 @@ struct NotchHermesChatView: View {
                     .font(.system(size: 10.5, weight: .medium))
                     .foregroundStyle(.white.opacity(0.55))
                     .lineLimit(1)
-                NotchHermesChatBubble(words: message.text, mine: false, text: text)
+                quote(message, mine: false)
+                NotchHermesChatBubble(words: message.text, mine: false, text: text,
+                                      reactions: message.reactions ?? [])
                 linkCards(message.text)
             }
             .accessibilityElement(children: .contain)
             .accessibilityLabel("\(text.reachedOut(message.source)): \(message.text)")
         }
+    }
+
+    /// The message an inline reply answers, quoted by its first line above
+    /// the reply, as Messages shows it. Nothing when it is not in the
+    /// transcript (older than the thread the page holds).
+    @ViewBuilder private func quote(_ message: NotchHermesChatMessage, mine: Bool) -> some View {
+        if let target = message.replyTo,
+           let original = chat.messages.first(where: { $0.id == target }) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrowshape.turn.up.left")
+                    .font(.system(size: 9, weight: .medium))
+                Text(Self.firstLine(original.text))
+                    .font(.system(size: 10.5))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundStyle(.white.opacity(0.45))
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private static func firstLine(_ words: String) -> String {
+        words.split(whereSeparator: \.isNewline).first.map(String.init) ?? words
     }
 
     /// A card under each web link an agent's message carries, in order.
@@ -420,6 +453,8 @@ private struct NotchHermesChatBubble: View {
     let text: NotchHermesChatStrings
     /// A reply still being written: no actions until it is whole.
     var live = false
+    /// Tapbacks on the message, drawn on the bubble's top corner.
+    var reactions: [NotchHermesChatMessage.Reaction] = []
     /// Puts your message back in the field to send again, changed.
     var edit: (() -> Void)? = nil
     @State private var hovered = false
@@ -450,6 +485,10 @@ private struct NotchHermesChatBubble: View {
                 .padding(.vertical, 8)
                 .background(mine ? Color.white.opacity(0.92) : Color.white.opacity(0.09),
                             in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                // On the corner away from the bubble's own side, as in
+                // Messages, overlapping the edge rather than the words.
+                .overlay(alignment: mine ? .topLeading : .topTrailing) { reactionBadge }
+                .padding(.top, reactions.isEmpty ? 0 : 9)
             if !mine { actions }
         }
         .contentShape(Rectangle())
@@ -464,6 +503,19 @@ private struct NotchHermesChatBubble: View {
             options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace,
                            failurePolicy: .returnPartiallyParsedIfPossible)) else { return Text(words) }
         return Text(styled)
+    }
+
+    @ViewBuilder private var reactionBadge: some View {
+        if !reactions.isEmpty {
+            Text(reactions.map(\.emoji).joined())
+                .font(.system(size: 11))
+                .padding(.horizontal, 5)
+                .padding(.vertical, 2)
+                .background(Color(white: 0.22), in: Capsule())
+                .overlay(Capsule().strokeBorder(Color.black.opacity(0.6), lineWidth: 1.5))
+                .offset(x: mine ? -8 : 8, y: -11)
+                .accessibilityLabel(reactions.map(\.emoji).joined(separator: " "))
+        }
     }
 
     private var actions: some View {

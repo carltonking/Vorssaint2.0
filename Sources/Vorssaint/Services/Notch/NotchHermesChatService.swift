@@ -524,6 +524,11 @@ final class NotchHermesChatService: ObservableObject {
             confirm(message)
         case .received(let message):
             receive(message)
+        case .reacted(let reaction):
+            // A tapback changes a line already shown; it is not a reply and
+            // asks for no attention.
+            let updated = InstinctMessagesSupport.applying(reaction, to: messages)
+            if updated != messages { messages = updated }
         }
     }
 
@@ -547,7 +552,7 @@ final class NotchHermesChatService: ObservableObject {
     private func receive(_ message: NotchHermesChatMessage) {
         guard !messages.contains(where: { $0.id == message.id }) else { return }
         if InstinctMessagesSupport.isUnprompted(waiting: working, lastAnswer: lastAnswer, at: message.date) {
-            append(NotchHermesChatMessage(id: message.id, role: .proactive, text: message.text, date: message.date))
+            append(message.with(role: .proactive))
             reachOut(routine: nil)
             return
         }
