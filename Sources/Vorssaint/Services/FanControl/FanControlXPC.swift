@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import CryptoKit
 import Foundation
+import Security
 
 enum FanControlIdentifiers {
-    static let teamID = "3D485NHW29"
-
     #if VORSSAINT_DEVELOPMENT
     static let appBundleID = "com.vorssaint.utils.dev"
     #else
@@ -15,10 +15,64 @@ enum FanControlIdentifiers {
     static let helperID = "\(appBundleID).fan-control"
     static let plistName = "\(helperID).plist"
 
-    static let appCodeRequirement =
-        "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\" and identifier \"\(appBundleID)\""
-    static let helperCodeRequirement =
-        "anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\" and identifier \"\(helperID)\""
+    /// Both ends of the connection must prove they carry this build's signing
+    /// identity, or XPC refuses to deliver a single message and Fan Control
+    /// reads as unavailable while the helper is perfectly healthy.
+    ///
+    /// The release build ships under the Developer ID team, so a team-scoped
+    /// requirement is the strongest check available. A local build is signed
+    /// with the certificate Tools/setup-signing.sh creates, which carries no
+    /// organizational unit and no Apple anchor; a requirement that names the
+    /// team (`certificate leaf[subject.OU] = …`) or `anchor apple generic`
+    /// therefore rejects the developer build against itself. Deriving the
+    /// requirement from our own signature keeps the team check for Developer
+    /// ID builds and falls back to that certificate's own hash otherwise,
+    /// without pinning one machine's certificate into the source.
+    static let appCodeRequirement = codeRequirement(for: appBundleID)
+    static let helperCodeRequirement = codeRequirement(for: helperID)
+
+    private static func codeRequirement(for identifier: String) -> String {
+        let signing = ownSigningIdentity()
+        if let team = signing.teamID {
+            return "anchor apple generic and certificate leaf[subject.OU] = \"\(team)\""
+                + " and identifier \"\(identifier)\""
+        }
+        if let certificateHash = signing.certificateHash {
+            return "certificate root = H\"\(certificateHash)\" and identifier \"\(identifier)\""
+        }
+        // An ad-hoc signature has no certificate to pin to, so the identifier
+        // is all that is left. That only ever happens on a fresh checkout that
+        // has not run Tools/setup-signing.sh yet.
+        return "identifier \"\(identifier)\""
+    }
+
+    /// `SecCodeCopySelf` reports the running image's signature: the team the
+    /// Build & Release certificate carries, and the chain a self-signed
+    /// certificate is the root of.
+    private static func ownSigningIdentity() -> (teamID: String?, certificateHash: String?) {
+        var code: SecCode?
+        var staticCode: SecStaticCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code,
+              SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess,
+              let staticCode else { return (nil, nil) }
+        var info: CFDictionary?
+        let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
+        guard SecCodeCopySigningInformation(staticCode, flags, &info) == errSecSuccess,
+              let info else { return (nil, nil) }
+        let dictionary = info as NSDictionary
+        let certificates = dictionary[kSecCodeInfoCertificates] as? [SecCertificate]
+        return (dictionary[kSecCodeInfoTeamIdentifier] as? String,
+                certificates?.last.flatMap(sha1(of:)))
+    }
+
+    /// Matches the hash `codesign` prints for a self-signed certificate, and
+    /// the form it uses in the designated requirement it derives for one.
+    private static func sha1(of certificate: SecCertificate) -> String {
+        let data = SecCertificateCopyData(certificate) as Data
+        return Insecure.SHA1.hash(data: data)
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
 }
 
 @objc protocol FanControlXPCProtocol {

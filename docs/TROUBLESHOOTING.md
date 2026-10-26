@@ -41,6 +41,10 @@ This permission is used by the mixer, the optional live equalizer and system aud
 
 Finder cut and paste, the uninstaller and Homebrew's Terminal handoff may ask for Automation. If a Finder move or Terminal handoff does nothing after a denial, open System Settings, Privacy and Security, Automation, and allow Vorssaint for the app it needs to control.
 
+### Fan Control
+
+Fan Control runs through a privileged helper, and macOS only starts that helper when the app that installed it carries an Apple-issued signature. In the official app that is always true. In a copy you built yourself it holds only when you signed it with an Apple Development or Developer ID certificate; a build signed with the local self-signed identity shows the helper as unavailable, while live fan speeds still read normally. See the [contributing guide](../CONTRIBUTING.md) for local signing.
+
 ## Clipboard history does not copy or paste
 
 First check whether a fresh copy appears in history. History must be enabled,

@@ -34,6 +34,13 @@ failures. For stale grants, see [troubleshooting](docs/TROUBLESHOOTING.md#resett
 Official releases use Developer ID signing and notarization through the protected
 release workflow. Local signing does not produce an official release.
 
+Fan Control needs more than a stable identity: its helper runs as a privileged
+system daemon, and macOS will not execute one signed with the local self-signed
+certificate, so the feature reports the helper as unavailable. Sign a free Apple
+Development certificate from Xcode (Settings, Accounts, Manage Certificates) and
+`./build.sh --dev` uses it automatically. Every other feature works with the
+local identity.
+
 ## Scope and implementation
 
 Before a substantial feature, search existing issues and PRs and discuss the
