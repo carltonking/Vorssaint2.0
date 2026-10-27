@@ -20,7 +20,7 @@ struct NotchNotice: Equatable {
     /// plays this, so the notice itself is its reaction.
     var mascot: NotchMascotReaction? = nil
     /// VERTUS or Instinct finished writing ("vertus", "instinct"): the
-    /// notice wears that agent's icon and a click opens its page.
+    /// notice is that agent's name, and a click opens its page.
     var chatAgent: String? = nil
     /// A banner that replaces one still on screen keeps at least its wings,
     /// so a burst of messages does not resize the island with each one.
@@ -54,7 +54,9 @@ struct NotchNotice: Equatable {
         let maximum: CGFloat = event == .accessory && level == nil ? 160 : 240
         func fitted(_ content: CGFloat) -> CGFloat { min(maximum, max(Self.minimumWing, ceil(content) + 16 + cameraGap)) }
         // An empty title leaves the mark alone, without the space after it.
-        let mark = fitted(leading > 0 ? leading + 18 + 8 : 18)
+        // An agent's reply shows its name with no mark before it.
+        let markRoom: CGFloat = chatAgent == nil ? 18 + 8 : 0
+        let mark = fitted(leading > 0 ? leading + markRoom : 18)
         guard level == nil else { return NotchNoticeWings(leading: mark, trailing: mark) }
         return NotchNoticeWings(leading: mark, trailing: fitted((detail as NSString).size(withAttributes: [.font: font]).width))
     }
