@@ -69,16 +69,32 @@ final class NotchInstinctMessagesClient: NotchAgentChatTransport {
     }
 
     func send(_ text: String) {
-        let arguments = Support.sendArguments(number: number, text: text)
+        send(text, attachments: [])
+    }
+
+    /// The words as one text, then each file as one of its own, as Messages
+    /// sends them; the first that fails ends the turn with its reason.
+    func send(_ text: String, attachments: [URL]) {
+        var sends: [[String]] = []
+        if !text.isEmpty { sends.append(Support.sendArguments(number: number, text: text)) }
+        sends += attachments.map { Support.sendArguments(number: number, file: $0) }
+        guard !sends.isEmpty else { return }
         sendQueue.async {
-            let result = self.run(arguments, timeout: Self.sendTimeout)
+            var failure: NotchHermesChatClient.Event?
+            for arguments in sends {
+                let result = self.run(arguments, timeout: Self.sendTimeout)
+                if result.timedOut {
+                    failure = .turnFailed("imsg send did not finish.")
+                } else if result.status != 0, !Support.probablySent(result.output) {
+                    failure = Support.isUnreadable(result.output) ? .needsFullDiskAccess
+                        : .turnFailed(Support.reason(result.output))
+                }
+                if failure != nil { break }
+            }
             self.queue.async {
                 guard !self.ended else { return }
-                if result.timedOut {
-                    self.emit(.turnFailed("imsg send did not finish."))
-                } else if result.status != 0, !Support.probablySent(result.output) {
-                    self.emit(Support.isUnreadable(result.output) ? .needsFullDiskAccess
-                              : .turnFailed(Support.reason(result.output)))
+                if let failure {
+                    self.emit(failure)
                 } else {
                     self.waitForReply()
                 }

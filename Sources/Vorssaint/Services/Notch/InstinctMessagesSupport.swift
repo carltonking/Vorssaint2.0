@@ -20,6 +20,8 @@ struct InstinctMessageRecord: Equatable {
     /// The message it answers inline (`thread_originator_guid`). Not
     /// `reply_to_guid`, which imsg sets on every message to the one before.
     var replyToGuid: String? = nil
+    /// Files on the message, where Messages keeps them.
+    var attachments: [NotchHermesChatMessage.Attachment] = []
 }
 
 /// A tapback arriving on the watch: Messages stores it as a row of its own
@@ -113,9 +115,9 @@ enum InstinctMessagesSupport {
         // message; it is read as a reaction instead.
         guard object["is_reaction"] as? Bool != true else { return nil }
         let text = cleaned(object["text"] as? String ?? "")
-        // An attachment alone or an edit record has no words to show; the
-        // thread on the phone is where those are seen.
-        guard !text.isEmpty else { return nil }
+        let files = attachments(object["attachments"])
+        // An edit record has neither words nor files to show.
+        guard !text.isEmpty || !files.isEmpty else { return nil }
         let originator = (object["thread_originator_guid"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         return InstinctMessageRecord(
             rowID: rowID,
@@ -128,7 +130,23 @@ enum InstinctMessagesSupport {
             participants: object["participants"] as? [String] ?? [],
             isGroup: object["is_group"] as? Bool ?? false,
             reactions: reactions(object["reactions"]),
-            replyToGuid: originator)
+            replyToGuid: originator,
+            attachments: files)
+    }
+
+    /// The files `imsg --attachments` lists on a message, where they are on
+    /// this Mac. Stickers and files Messages no longer has are left out.
+    static func attachments(_ value: Any?) -> [NotchHermesChatMessage.Attachment] {
+        guard let list = value as? [[String: Any]] else { return [] }
+        return list.compactMap { item in
+            guard item["is_sticker"] as? Bool != true, item["missing"] as? Bool != true,
+                  let raw = (item["original_path"] ?? item["path"] ?? item["filename"]) as? String,
+                  !raw.isEmpty else { return nil }
+            let path = (raw as NSString).expandingTildeInPath
+            let name = (item["transfer_name"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (path as NSString).lastPathComponent
+            return NotchHermesChatMessage.Attachment(path: path, name: name)
+        }
     }
 
     static func reaction(fromLine line: String) -> InstinctReactionEvent? {
@@ -320,7 +338,8 @@ enum InstinctMessagesSupport {
                                role: role ?? (record.fromMe ? .person : .hermes),
                                text: record.text, date: record.date,
                                reactions: record.reactions.isEmpty ? nil : record.reactions,
-                               replyTo: record.replyToGuid.map(stableID))
+                               replyTo: record.replyToGuid.map(stableID),
+                               attachments: record.attachments.isEmpty ? nil : record.attachments)
     }
 
     /// The thread as Messages has it, in place of whatever the page held: the
@@ -371,14 +390,14 @@ enum InstinctMessagesSupport {
     }
 
     static func historyArguments(chatID: Int64) -> [String] {
-        ["history", "--chat-id", String(chatID), "--limit", String(historyLimit), "--json"]
+        ["history", "--chat-id", String(chatID), "--limit", String(historyLimit), "--json", "--attachments"]
     }
 
     /// The live stream: the known conversation when there is one, else the
     /// number, which also catches the thread the first message creates.
     static func watchArguments(chatID: Int64?, number: String, after rowID: Int64?) -> [String] {
         // Tapbacks arrive as rows of their own, printed only when asked for.
-        var arguments = ["watch", "--json", "--reactions"]
+        var arguments = ["watch", "--json", "--reactions", "--attachments"]
         if let chatID { arguments += ["--chat-id", String(chatID)] }
         else { arguments += ["--participants", number.trimmingCharacters(in: .whitespacesAndNewlines)] }
         if let rowID { arguments += ["--since-rowid", String(rowID)] }
@@ -389,6 +408,10 @@ enum InstinctMessagesSupport {
     /// them is read as a command.
     static func sendArguments(number: String, text: String) -> [String] {
         ["send", "--to", number.trimmingCharacters(in: .whitespacesAndNewlines), "--text", text]
+    }
+
+    static func sendArguments(number: String, file: URL) -> [String] {
+        ["send", "--to", number.trimmingCharacters(in: .whitespacesAndNewlines), "--file", file.path]
     }
 
     // MARK: Helpers

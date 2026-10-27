@@ -2658,6 +2658,26 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
                 WhatsAppDownloadOrganizer.shared.undoLastRun(transactionID: transactionID)
             }
         }
+        // An agent's message opens its conversation in the island.
+        if response.actionIdentifier == UNNotificationDefaultActionIdentifier,
+           let agent = NotchAgentNotifier.agent(from: response) {
+            DispatchQueue.main.async {
+                if agent == .vertus {
+                    NotchService.shared.showHermesChat(toggle: false)
+                } else {
+                    NotchService.shared.showInstinctChat(toggle: false)
+                }
+            }
+        }
         completionHandler()
+    }
+
+    /// The app counts as in front while the island has the keyboard; an
+    /// agent's banner still shows then, as Messages' do.
+    func userNotificationCenter(_ center: UNUserNotificationCenter,
+                                willPresent notification: UNNotification,
+                                withCompletionHandler completionHandler:
+                                    @escaping (UNNotificationPresentationOptions) -> Void) {
+        completionHandler(NotchAgentNotifier.isAgentNotification(notification) ? [.banner, .list, .sound] : [])
     }
 }

@@ -3,6 +3,7 @@
 
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The Hermes Chat settings: the switch, the command, and where the
 /// conversation stands. It lives on the island's own settings page, as the
@@ -188,7 +189,18 @@ struct NotchHermesChatView: View {
     /// Replies finished before the page opened: only the ones after it make
     /// the companion cheer here.
     @State private var cheeredReplies: Int?
+    /// The message the next one answers, chosen by swiping it or its Reply.
+    @State private var replyTarget: UUID?
+    /// Files waiting to go with the next message.
+    @State private var pending: [URL] = []
+    /// The bubble under the pointer, which a two-finger swipe moves.
+    @State private var hoveredMessage: UUID?
+    @State private var swipedMessage: UUID?
+    @State private var swipeOffset: CGFloat = 0
+    @State private var swipe = NotchMessagesSwipe()
+    @State private var dropTargeted = false
     private var text: NotchHermesChatStrings { chat.strings(l10n.language) }
+    private var messaging: NotchAgentMessagingStrings { FeatureStrings.notchAgentMessaging(l10n.language) }
 
     init(size: CGSize, chat: NotchHermesChatService = .shared) {
         self.size = size
@@ -229,9 +241,30 @@ struct NotchHermesChatView: View {
         .onAppear {
             if cheeredReplies == nil { cheeredReplies = chat.completedReplies }
             voice.refreshAuthorization()
+            swipe.install { phase in handleSwipe(phase) }
         }
         // The microphone never outlives the page that opened it.
-        .onDisappear { voice.cancelDictation() }
+        .onDisappear {
+            voice.cancelDictation()
+            swipe.remove()
+        }
+        // Files dropped anywhere on the page go with the next message.
+        .onDrop(of: [.fileURL], isTargeted: $dropTargeted) { providers in
+            for provider in providers {
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, url.isFileURL else { return }
+                    DispatchQueue.main.async { if !pending.contains(url) { pending.append(url) } }
+                }
+            }
+            return true
+        }
+        .overlay {
+            if dropTargeted {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .allowsHitTesting(false)
+            }
+        }
         .onChange(of: voice.heard) { _, words in
             guard voice.phase == .listening else { return }
             draft = NotchHermesVoiceSupport.draft(typed: typedBeforeDictation, dictated: words)
@@ -259,9 +292,9 @@ struct NotchHermesChatView: View {
     private var transcript: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(chat.messages) { message in
-                        row(message)
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(Array(chat.messages.enumerated()), id: \.element.id) { index, message in
+                        row(message, index: index)
                     }
                     liveTurn
                     Color.clear.frame(height: 1).id(Self.bottomID)
@@ -291,74 +324,138 @@ struct NotchHermesChatView: View {
         }
     }
 
-    @ViewBuilder private func row(_ message: NotchHermesChatMessage) -> some View {
-        switch message.role {
-        case .person:
-            VStack(alignment: .trailing, spacing: 3) {
-                quote(message, mine: true)
-                NotchHermesChatBubble(words: message.text, mine: true, text: text,
-                                      reactions: message.reactions ?? []) { draft = message.text; typing = true }
-                    .accessibilityLabel("\(text.you): \(message.text)")
-            }
-        case .hermes:
-            VStack(alignment: .leading, spacing: 6) {
-                quote(message, mine: false)
-                NotchHermesChatBubble(words: message.text, mine: false, text: text,
-                                      reactions: message.reactions ?? [])
-                    .accessibilityLabel("\(text.title): \(message.text)")
-                linkCards(message.text)
-            }
-        case .tool:
-            Label(message.text, systemImage: "wrench.and.screwdriver")
-                .font(.system(size: 10.5))
-                .foregroundStyle(.white.opacity(0.45))
-                .lineLimit(2)
-        case .note:
-            Label(message.text, systemImage: "info.circle")
-                .font(.system(size: 10.5))
-                .foregroundStyle(.white.opacity(0.5))
-                .fixedSize(horizontal: false, vertical: true)
-        case .proactive:
-            // Marked above the bubble, so a message VERTUS sent unasked
-            // does not read as the answer to whatever was said before it.
-            VStack(alignment: .leading, spacing: 4) {
-                Label(text.reachedOut(message.source), systemImage: "sparkles")
-                    .font(.system(size: 10.5, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.55))
-                    .lineLimit(1)
-                quote(message, mine: false)
-                NotchHermesChatBubble(words: message.text, mine: false, text: text,
-                                      reactions: message.reactions ?? [])
-                linkCards(message.text)
-            }
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel("\(text.reachedOut(message.source)): \(message.text)")
+    /// Which side a message sits on, as in Messages: yours right, the
+    /// agent's left; the island's own lines sit apart from both.
+    private enum Side { case mine, theirs, aside }
+
+    private func side(_ role: NotchHermesChatMessage.Role) -> Side {
+        switch role {
+        case .person: return .mine
+        case .hermes, .proactive: return .theirs
+        case .tool, .note: return .aside
         }
     }
 
-    /// The message an inline reply answers, quoted by its first line above
-    /// the reply, as Messages shows it. Nothing when it is not in the
-    /// transcript (older than the thread the page holds).
+    @ViewBuilder private func row(_ message: NotchHermesChatMessage, index: Int) -> some View {
+        let messages = chat.messages
+        let here = side(message.role)
+        let previous = index > 0 ? side(messages[index - 1].role) : nil
+        let next = index + 1 < messages.count ? side(messages[index + 1].role) : nil
+        // A run of messages from one side tightens up, and only its last
+        // bubble carries the tail, as in Messages.
+        let startsRun = previous != here
+        let endsRun = next != here || (index + 1 == messages.count && chat.working && here == .theirs)
+        Group {
+            switch here {
+            case .mine, .theirs:
+                bubbleRow(message, mine: here == .mine, tail: endsRun)
+            case .aside:
+                Label(message.text, systemImage: message.role == .tool ? "wrench.and.screwdriver" : "info.circle")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(.white.opacity(message.role == .tool ? 0.45 : 0.5))
+                    .lineLimit(message.role == .tool ? 2 : nil)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .padding(.top, startsRun && index > 0 ? 8 : 0)
+    }
+
+    private func bubbleRow(_ message: NotchHermesChatMessage, mine: Bool, tail: Bool) -> some View {
+        let swiping = swipedMessage == message.id ? swipeOffset : 0
+        return VStack(alignment: mine ? .trailing : .leading, spacing: 2) {
+            quote(message, mine: mine)
+            NotchHermesChatBubble(words: message.text, mine: mine, tail: tail, text: text, messaging: messaging,
+                                  reactions: message.reactions ?? [], attachments: message.attachments ?? [],
+                                  reply: { startReply(to: message.id) },
+                                  edit: mine ? { draft = message.text; typing = true } : nil)
+                .accessibilityLabel("\(mine ? text.you : text.title): \(message.text)")
+            if !mine { linkCards(message.text) }
+        }
+        .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+        .offset(x: swiping)
+        // The reply arrow shows from under the bubble as it is swiped.
+        .background(alignment: .trailing) {
+            Image(systemName: "arrowshape.turn.up.left.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(.white.opacity(0.7))
+                .opacity(min(1, Double(-swiping) / NotchMessagesSwipe.threshold))
+                .padding(.trailing, 6)
+        }
+        .contentShape(Rectangle())
+        .onHover { inside in
+            if inside { hoveredMessage = message.id } else if hoveredMessage == message.id { hoveredMessage = nil }
+        }
+        .contextMenu {
+            Button(messaging.reply) { startReply(to: message.id) }
+            Button(text.copyMessage) {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(message.text, forType: .string)
+            }
+        }
+    }
+
+    /// The message an inline reply answers, as Messages shows it: a faded
+    /// copy of it above the reply, joined to it by a line. Nothing when it
+    /// is not in the transcript (older than the thread the page holds).
     @ViewBuilder private func quote(_ message: NotchHermesChatMessage, mine: Bool) -> some View {
         if let target = message.replyTo,
            let original = chat.messages.first(where: { $0.id == target }) {
-            HStack(spacing: 4) {
-                Image(systemName: "arrowshape.turn.up.left")
-                    .font(.system(size: 9, weight: .medium))
-                Text(Self.firstLine(original.text))
-                    .font(.system(size: 10.5))
-                    .lineLimit(1)
+            let theirs = original.role != .person
+            HStack(spacing: 0) {
+                if mine { Spacer(minLength: 60) }
+                Text(original.text.isEmpty ? (original.attachments?.first?.name ?? "") : original.text)
+                    .font(.system(size: 11))
+                    .lineLimit(2)
                     .truncationMode(.tail)
+                    .foregroundStyle(.white.opacity(0.75))
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(theirs ? NotchMessagesStyle.theirs : NotchMessagesStyle.mine,
+                                in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .opacity(0.55)
+                if !mine { Spacer(minLength: 60) }
             }
-            .foregroundStyle(.white.opacity(0.45))
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, alignment: mine ? .trailing : .leading)
+            .overlay(alignment: mine ? .bottomTrailing : .bottomLeading) {
+                // The thread line from the quote down into the reply.
+                Rectangle()
+                    .fill(Color.white.opacity(0.25))
+                    .frame(width: 1.5, height: 10)
+                    .offset(x: mine ? -14 : 14, y: 10)
+            }
+            .padding(.bottom, 4)
+            .onTapGesture { startReply(to: original.id) }
             .accessibilityElement(children: .combine)
+            .accessibilityLabel("\(messaging.replyingTo): \(original.text)")
         }
     }
 
     private static func firstLine(_ words: String) -> String {
-        words.split(whereSeparator: \.isNewline).first.map(String.init) ?? words
+        NotchAgentReplySupport.firstLine(words)
+    }
+
+    private func startReply(to id: UUID) {
+        replyTarget = id
+        typing = true
+    }
+
+    /// A two-finger swipe left on a bubble: it follows the fingers, and let
+    /// go far enough it becomes the message the next one replies to.
+    private func handleSwipe(_ phase: NotchMessagesSwipe.Phase) -> Bool {
+        switch phase {
+        case .moved(let distance):
+            guard let hovered = hoveredMessage ?? swipedMessage,
+                  chat.messages.contains(where: { $0.id == hovered && side($0.role) != .aside }) else { return false }
+            swipedMessage = hovered
+            swipeOffset = max(-NotchMessagesSwipe.limit, min(0, distance))
+            return true
+        case .ended:
+            guard let swiped = swipedMessage else { return false }
+            if swipeOffset <= -NotchMessagesSwipe.threshold { startReply(to: swiped) }
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { swipeOffset = 0 }
+            swipedMessage = nil
+            return true
+        }
     }
 
     /// A card under each web link an agent's message carries, in order.
@@ -382,15 +479,11 @@ struct NotchHermesChatView: View {
                         .lineLimit(5)
                 }
                 if chat.reply.isEmpty {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.mini)
-                        Text("\(text.thinking)…")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.white.opacity(0.5))
-                    }
-                    .padding(.leading, 4)
+                    NotchTypingBubble()
+                        .accessibilityLabel("\(text.thinking)…")
                 } else {
-                    NotchHermesChatBubble(words: chat.reply, mine: false, text: text, live: true)
+                    NotchHermesChatBubble(words: chat.reply, mine: false, tail: true, text: text,
+                                          messaging: messaging, live: true)
                 }
             }
         }
@@ -473,30 +566,114 @@ struct NotchHermesChatView: View {
     }
 
     private var composer: some View {
-        HStack(spacing: 8) {
-            TextField(listening ? text.listening : text.placeholder, text: $draft, axis: .vertical)
-                .textFieldStyle(.plain)
-                .font(.system(size: 12))
-                .lineLimit(1...3)
-                .focused($typing)
-                .onSubmit(submit)
-                .accessibilityLabel(text.placeholder)
-            NotchIconButton(symbol: listening ? "mic.fill" : "mic",
-                            title: listening ? text.stopDictation : text.dictate,
-                            selected: listening, action: toggleDictation)
-                // Refused once, the system will not ask again: the note in
-                // the conversation says where to allow it.
-                .disabled(preview || voice.phase == .denied || voice.phase == .requesting)
-            if chat.working {
-                NotchIconButton(symbol: "stop.fill", title: text.stop) { chat.cancel() }
-            } else {
-                NotchIconButton(symbol: "arrow.up", title: text.send, action: submit)
-                    .disabled(trimmedDraft.isEmpty)
+        VStack(alignment: .leading, spacing: 6) {
+            if let target = replyTarget, let original = chat.messages.first(where: { $0.id == target }) {
+                HStack(spacing: 8) {
+                    Rectangle().fill(Color.accentColor).frame(width: 2)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(messaging.replyingTo)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.55))
+                        Text(Self.firstLine(original.text.isEmpty ? (original.attachments?.first?.name ?? "") : original.text))
+                            .font(.system(size: 11))
+                            .foregroundStyle(.white.opacity(0.8))
+                            .lineLimit(1)
+                    }
+                    Spacer(minLength: 0)
+                    NotchIconButton(symbol: "xmark", title: messaging.cancelReply) { replyTarget = nil }
+                }
+                .frame(height: 30)
+                .padding(.horizontal, 6)
+            }
+            if !pending.isEmpty {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 6) {
+                        ForEach(pending, id: \.self) { url in
+                            NotchPendingAttachment(url: url, remove: messaging.removeAttachment) {
+                                pending.removeAll { $0 == url }
+                            }
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .scrollIndicators(.hidden)
+            }
+            HStack(alignment: .bottom, spacing: 6) {
+                Button(action: chooseAttachments) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.white.opacity(0.75))
+                        .frame(width: 28, height: 28)
+                        .background(Color.white.opacity(0.12), in: Circle())
+                        .contentShape(Circle())
+                }
+                .buttonStyle(.plain)
+                .help(messaging.attach)
+                .accessibilityLabel(messaging.attach)
+                .disabled(preview)
+                HStack(alignment: .bottom, spacing: 4) {
+                    TextField(listening ? text.listening : text.placeholder, text: $draft, axis: .vertical)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 12))
+                        .lineLimit(1...4)
+                        .focused($typing)
+                        .onSubmit(submit)
+                        .padding(.vertical, 6)
+                        .accessibilityLabel(text.placeholder)
+                    NotchIconButton(symbol: listening ? "mic.fill" : "mic",
+                                    title: listening ? text.stopDictation : text.dictate,
+                                    selected: listening, action: toggleDictation)
+                        // Refused once, the system will not ask again: the note in
+                        // the conversation says where to allow it.
+                        .disabled(preview || voice.phase == .denied || voice.phase == .requesting)
+                    sendButton
+                }
+                .padding(.leading, 11)
+                .padding(.trailing, 3)
+                .padding(.vertical, 1)
+                .frame(minHeight: 30)
+                .overlay(RoundedRectangle(cornerRadius: 15, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.22), lineWidth: 1))
             }
         }
-        .padding(.horizontal, 10)
-        .frame(minHeight: 34)
-        .modifier(NotchControlSurface(cornerRadius: 11))
+    }
+
+    /// Messages' blue arrow, or a stop while the agent writes.
+    @ViewBuilder private var sendButton: some View {
+        let canSend = !trimmedDraft.isEmpty || !pending.isEmpty
+        Button(action: chat.working && !canSend ? { chat.cancel() } : submit) {
+            Image(systemName: chat.working && !canSend ? "stop.fill" : "arrow.up")
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 24, height: 24)
+                .background(canSend || chat.working ? NotchMessagesStyle.mine : Color.white.opacity(0.15), in: Circle())
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .padding(.bottom, 2)
+        .help(chat.working && !canSend ? text.stop : text.send)
+        .accessibilityLabel(chat.working && !canSend ? text.stop : text.send)
+        .disabled(!canSend && !chat.working)
+    }
+
+    /// The plus: files from the Mac, as Messages' attachment button. The
+    /// island holds open while the panel is up.
+    private func chooseAttachments() {
+        let notch = NotchService.shared
+        let wasPinned = notch.pinned
+        notch.pinned = true
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        NSApp.activate(ignoringOtherApps: true)
+        panel.begin { response in
+            if response == .OK {
+                for url in panel.urls where !pending.contains(url) { pending.append(url) }
+            }
+            notch.pinned = wasPinned
+            typing = true
+        }
     }
 
     private var trimmedDraft: String {
@@ -519,27 +696,67 @@ struct NotchHermesChatView: View {
 
     private func submit() {
         let words = trimmedDraft
-        guard !words.isEmpty else { return }
+        guard !words.isEmpty || !pending.isEmpty else { return }
         // Sent by hand mid-dictation: the microphone closes without sending
         // the same words a second time.
         voice.cancelDictation()
         draft = ""
-        chat.send(words)
+        let files = pending
+        let target = replyTarget
+        pending = []
+        replyTarget = nil
+        chat.send(words, attachments: files, replyTo: target)
         typing = true
     }
 }
 
-/// One message as a chat shows it: yours on the right in a light bubble, the
-/// agent's on the left in a dark one with its Markdown drawn. Under the
-/// pointer, the actions for it sit beside the bubble.
+/// Messages' colours: your blue, the agent's grey.
+enum NotchMessagesStyle {
+    static let mine = Color(red: 0.04, green: 0.52, blue: 1.0)
+    static let theirs = Color(white: 0.24)
+}
+
+/// A bubble's outline as Messages draws it: a rounded rectangle, with a
+/// tail curling out of the bottom corner on the sender's side when it is the
+/// last of a run.
+struct NotchMessagesBubbleShape: Shape {
+    let mine: Bool
+    let tail: Bool
+
+    func path(in rect: CGRect) -> Path {
+        let radius = min(17, rect.height / 2)
+        var path = Path(roundedRect: rect, cornerRadius: radius, style: .continuous)
+        guard tail else { return path }
+        var curl = Path()
+        // Drawn for the right side, mirrored for the left.
+        let x = rect.maxX, y = rect.maxY
+        curl.move(to: CGPoint(x: x - 12, y: y - 9))
+        curl.addQuadCurve(to: CGPoint(x: x + 5, y: y), control: CGPoint(x: x - 2, y: y - 1))
+        curl.addQuadCurve(to: CGPoint(x: x - 16, y: y - 2), control: CGPoint(x: x - 6, y: y + 1))
+        curl.closeSubpath()
+        if !mine {
+            curl = curl.applying(CGAffineTransform(translationX: rect.minX + rect.maxX, y: 0).scaledBy(x: -1, y: 1))
+        }
+        path.addPath(curl)
+        return path
+    }
+}
+
+/// One message as Messages shows it: yours on the right in blue, the agent's
+/// on the left in grey with its Markdown drawn, files above the words. Under
+/// the pointer, Reply and Copy sit beside the bubble.
 private struct NotchHermesChatBubble: View {
     let words: String
     let mine: Bool
+    var tail = true
     let text: NotchHermesChatStrings
+    let messaging: NotchAgentMessagingStrings
     /// A reply still being written: no actions until it is whole.
     var live = false
     /// Tapbacks on the message, drawn on the bubble's top corner.
     var reactions: [NotchHermesChatMessage.Reaction] = []
+    var attachments: [NotchHermesChatMessage.Attachment] = []
+    var reply: (() -> Void)? = nil
     /// Puts your message back in the field to send again, changed.
     var edit: (() -> Void)? = nil
     @State private var hovered = false
@@ -557,27 +774,36 @@ private struct NotchHermesChatBubble: View {
     /// included: hovering only the words hid the actions as the pointer
     /// crossed the gap on its way to Copy.
     private var bubbleWithActions: some View {
-        HStack(alignment: .top, spacing: 6) {
+        HStack(alignment: .center, spacing: 6) {
             if mine { actions }
-            content
-                .font(.system(size: 12))
-                .foregroundStyle(mine ? Color.black.opacity(0.88) : Color.white.opacity(0.9))
-                .tint(mine ? Color.blue : Color.accentColor)
-                .lineSpacing(2)
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
-                .padding(.horizontal, 11)
-                .padding(.vertical, 8)
-                .background(mine ? Color.white.opacity(0.92) : Color.white.opacity(0.09),
-                            in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-                // On the corner away from the bubble's own side, as in
-                // Messages, overlapping the edge rather than the words.
-                .overlay(alignment: mine ? .topLeading : .topTrailing) { reactionBadge }
-                .padding(.top, reactions.isEmpty ? 0 : 9)
+            VStack(alignment: mine ? .trailing : .leading, spacing: 3) {
+                ForEach(attachments, id: \.self) { file in
+                    NotchAttachmentView(attachment: file, openTitle: messaging.open)
+                }
+                if !words.isEmpty { bubble }
+            }
             if !mine { actions }
         }
         .contentShape(Rectangle())
         .onHover { hovered = $0 }
+    }
+
+    private var bubble: some View {
+        content
+            .font(.system(size: 12))
+            .foregroundStyle(.white)
+            .tint(mine ? Color.white : Color(red: 0.4, green: 0.7, blue: 1.0))
+            .lineSpacing(2)
+            .fixedSize(horizontal: false, vertical: true)
+            .textSelection(.enabled)
+            .padding(.horizontal, 11)
+            .padding(.vertical, 7)
+            .background(mine ? NotchMessagesStyle.mine : NotchMessagesStyle.theirs,
+                        in: NotchMessagesBubbleShape(mine: mine, tail: tail))
+            // On the corner away from the bubble's own side, as in
+            // Messages, overlapping the edge rather than the words.
+            .overlay(alignment: mine ? .topLeading : .topTrailing) { reactionBadge }
+            .padding(.top, reactions.isEmpty ? 0 : 9)
     }
 
     /// The agent's words with their bold, italics, code and links drawn, and
@@ -605,13 +831,13 @@ private struct NotchHermesChatBubble: View {
 
     private var actions: some View {
         HStack(spacing: 2) {
+            if let reply { action("arrowshape.turn.up.left", messaging.reply, reply) }
             action("doc.on.doc", text.copyMessage) {
                 NSPasteboard.general.clearContents()
                 NSPasteboard.general.setString(words, forType: .string)
             }
             if let edit { action("pencil", text.editMessage, edit) }
         }
-        .padding(.top, 4)
         // Kept in the layout so the bubble does not shift as the pointer
         // comes and goes.
         .opacity(hovered && !live ? 1 : 0)
@@ -630,6 +856,181 @@ private struct NotchHermesChatBubble: View {
         .help(title)
         .accessibilityLabel(title)
     }
+}
+
+/// Messages' "typing" bubble: three dots pulsing in turn.
+struct NotchTypingBubble: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1 / 15, paused: reduceMotion)) { context in
+            let phase = context.date.timeIntervalSinceReferenceDate * 2.4
+            HStack(spacing: 4) {
+                ForEach(0..<3) { dot in
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 6, height: 6)
+                        .opacity(reduceMotion ? 0.6 : 0.35 + 0.55 * max(0, sin(phase - Double(dot) * 0.9)))
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(NotchMessagesStyle.theirs, in: NotchMessagesBubbleShape(mine: false, tail: true))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// A file in the thread: a picture shown as itself, anything else as its
+/// icon and name. A click opens it.
+struct NotchAttachmentView: View {
+    let attachment: NotchHermesChatMessage.Attachment
+    let openTitle: String
+    @State private var image: NSImage?
+
+    var body: some View {
+        Button { NSWorkspace.shared.open(attachment.url) } label: {
+            if attachment.isImage, let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: 180, maxHeight: 180)
+                    .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+            } else {
+                HStack(spacing: 8) {
+                    Image(nsImage: NSWorkspace.shared.icon(forFile: attachment.path))
+                        .resizable()
+                        .frame(width: 26, height: 26)
+                    Text(attachment.name)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 7)
+                .frame(maxWidth: 220, alignment: .leading)
+                .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            }
+        }
+        .buttonStyle(.plain)
+        .help("\(openTitle) \(attachment.name)")
+        .accessibilityLabel("\(openTitle) \(attachment.name)")
+        // Read off the main thread once the bubble is on screen.
+        .task(id: attachment.path) {
+            guard attachment.isImage else { return }
+            image = await NotchAttachmentView.thumbnail(attachment.url)
+        }
+    }
+
+    private static func thumbnail(_ url: URL) async -> NSImage? {
+        await Task.detached(priority: .utility) { NSImage(contentsOf: url) }.value
+    }
+}
+
+/// A file waiting to be sent, above the field, with its remove button.
+private struct NotchPendingAttachment: View {
+    let url: URL
+    let remove: String
+    let onRemove: () -> Void
+    @State private var image: NSImage?
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            Group {
+                if let image {
+                    Image(nsImage: image).resizable().aspectRatio(contentMode: .fill)
+                } else {
+                    VStack(spacing: 2) {
+                        Image(nsImage: NSWorkspace.shared.icon(forFile: url.path)).resizable().frame(width: 22, height: 22)
+                        Text(url.lastPathComponent).font(.system(size: 8.5)).lineLimit(1).truncationMode(.middle)
+                            .foregroundStyle(.white.opacity(0.7))
+                    }
+                    .padding(4)
+                }
+            }
+            .frame(width: 52, height: 52)
+            .background(Color.white.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 13))
+                    .symbolRenderingMode(.palette)
+                    .foregroundStyle(.white, Color(white: 0.3))
+            }
+            .buttonStyle(.plain)
+            .offset(x: 5, y: -5)
+            .help(remove)
+            .accessibilityLabel("\(remove) \(url.lastPathComponent)")
+        }
+        .task(id: url) {
+            let ext = url.pathExtension.lowercased()
+            guard NotchHermesChatMessage.Attachment.imageExtensions.contains(ext) else { return }
+            image = await Self.thumbnail(url)
+        }
+    }
+
+    private static func thumbnail(_ url: URL) async -> NSImage? {
+        await Task.detached(priority: .utility) { NSImage(contentsOf: url) }.value
+    }
+}
+
+/// Two-finger swipes over the transcript, read from the trackpad's scroll
+/// events, since SwiftUI has no swipe for a pointer. Only a mostly sideways
+/// swipe is taken; scrolling up and down is left to the transcript.
+final class NotchMessagesSwipe {
+    enum Phase { case moved(CGFloat), ended }
+    /// How far left a bubble is let go to become a reply, and how far it goes.
+    static let threshold: CGFloat = 44
+    static let limit: CGFloat = 70
+
+    private var monitor: Any?
+    private var horizontal = false
+    private var decided = false
+    private var distance: CGFloat = 0
+
+    func install(_ handler: @escaping (Phase) -> Bool) {
+        remove()
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
+            guard let self else { return event }
+            // A mouse wheel has no phases: it only ever scrolls.
+            if event.phase.isEmpty && event.momentumPhase.isEmpty { return event }
+            if !event.momentumPhase.isEmpty { return self.horizontal ? nil : event }
+            if event.phase.contains(.began) {
+                self.horizontal = false
+                self.decided = false
+                self.distance = 0
+            }
+            if event.phase.contains(.ended) || event.phase.contains(.cancelled) {
+                let was = self.horizontal
+                self.decided = false
+                if was { _ = handler(.ended) }
+                return was ? nil : event
+            }
+            if !self.decided {
+                let dx = abs(event.scrollingDeltaX), dy = abs(event.scrollingDeltaY)
+                guard dx + dy > 1.5 else { return event }
+                self.decided = true
+                self.horizontal = dx > dy * 1.5
+            }
+            guard self.horizontal else { return event }
+            // The fingers' own direction, whatever the scrolling preference.
+            let fingers = event.isDirectionInvertedFromDevice ? event.scrollingDeltaX : -event.scrollingDeltaX
+            self.distance += fingers
+            if !handler(.moved(self.distance)) {
+                self.horizontal = false
+                return event
+            }
+            return nil
+        }
+    }
+
+    func remove() {
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+    }
+
+    deinit { remove() }
 }
 
 /// The VERTUS mark: a pointed-top hexagon with a triangle cut out of it,

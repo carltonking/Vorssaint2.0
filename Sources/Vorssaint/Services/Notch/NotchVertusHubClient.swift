@@ -8,10 +8,19 @@ import Foundation
 protocol NotchAgentChatTransport: AnyObject {
     func start()
     func send(_ text: String)
+    /// Words with files. An agent on this Mac gets the files' paths.
+    func send(_ text: String, attachments: [URL])
     func cancel()
     func end()
     /// Answers an approval the agent is waiting on.
     func answer(_ approval: String, choice: NotchAgentApproval.Choice)
+}
+
+/// Files go to an agent on this Mac by path; Messages carries them as files.
+extension NotchAgentChatTransport {
+    func send(_ text: String, attachments: [URL]) {
+        send(NotchAgentReplySupport.prompt(text, attachments: attachments))
+    }
 }
 
 /// `hermes acp` never reaches an approval card: the island refuses its

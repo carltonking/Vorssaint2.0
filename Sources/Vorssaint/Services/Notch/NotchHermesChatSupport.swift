@@ -313,9 +313,23 @@ struct NotchHermesChatMessage: Identifiable, Equatable, Codable {
     /// The message this one answers inline, when it was sent as a reply to
     /// a particular message rather than to the thread.
     var replyTo: UUID?
+    /// Files sent with the message, as Messages shows them in the thread.
+    /// Optional so a history saved before they existed still reads.
+    var attachments: [Attachment]?
+
+    /// A file on this Mac: one chosen to send, or one Messages received.
+    struct Attachment: Codable, Equatable, Hashable {
+        let path: String
+        let name: String
+
+        static let imageExtensions: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "heif", "webp", "tiff", "bmp"]
+        var isImage: Bool { Self.imageExtensions.contains((name as NSString).pathExtension.lowercased())
+            || Self.imageExtensions.contains((path as NSString).pathExtension.lowercased()) }
+        var url: URL { URL(fileURLWithPath: path) }
+    }
 
     init(id: UUID = UUID(), role: Role, text: String, date: Date = Date(), source: String? = nil,
-         reactions: [Reaction]? = nil, replyTo: UUID? = nil) {
+         reactions: [Reaction]? = nil, replyTo: UUID? = nil, attachments: [Attachment]? = nil) {
         self.id = id
         self.role = role
         self.text = text
@@ -323,12 +337,88 @@ struct NotchHermesChatMessage: Identifiable, Equatable, Codable {
         self.source = source
         self.reactions = reactions
         self.replyTo = replyTo
+        self.attachments = attachments
     }
 
     /// The same message under another role, keeping everything it carries.
     func with(role: Role) -> NotchHermesChatMessage {
         NotchHermesChatMessage(id: id, role: role, text: text, date: date, source: source,
-                               reactions: reactions, replyTo: replyTo)
+                               reactions: reactions, replyTo: replyTo, attachments: attachments)
+    }
+}
+
+/// Replies, attachments and notifications for the agents' pages, as Messages
+/// does them, kept apart from the views so they can be tested.
+enum NotchAgentReplySupport {
+    /// How much of the message being answered rides along with a reply.
+    static let quoteLimit = 80
+
+    static func firstLine(_ words: String) -> String {
+        words.split(whereSeparator: \.isNewline).first.map(String.init) ?? words
+    }
+
+    /// The line that tells the agent which message a reply answers. iMessage
+    /// threads cannot be started from `imsg`, so the quote travels as text
+    /// and is read back into a reply when the thread is read again.
+    static func quoteLine(for original: String) -> String {
+        let line = firstLine(original).trimmingCharacters(in: .whitespaces)
+        let short = line.count > quoteLimit ? String(line.prefix(quoteLimit - 1)) + "…" : line
+        return "> " + short
+    }
+
+    /// What goes to the agent for a reply: the quote, then the words.
+    static func outgoing(_ words: String, quoting original: String?) -> String {
+        guard let original, !original.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return words }
+        return quoteLine(for: original) + "\n" + words
+    }
+
+    /// A message of yours read back from Messages: its quote line becomes
+    /// the reply it was, pointing at the latest earlier message it quotes.
+    /// Messages without a quote, or quoting nothing in sight, stay as read.
+    static func resolvingReply(_ message: NotchHermesChatMessage,
+                               among earlier: [NotchHermesChatMessage]) -> NotchHermesChatMessage {
+        guard message.role == .person, message.replyTo == nil, message.text.hasPrefix("> "),
+              let newline = message.text.firstIndex(where: \.isNewline) else { return message }
+        var snippet = String(message.text[message.text.index(message.text.startIndex, offsetBy: 2)..<newline])
+            .trimmingCharacters(in: .whitespaces)
+        if snippet.hasSuffix("…") { snippet.removeLast() }
+        guard !snippet.isEmpty,
+              let original = earlier.last(where: {
+                  $0.id != message.id && firstLine($0.text).trimmingCharacters(in: .whitespaces).hasPrefix(snippet)
+              }) else { return message }
+        var resolved = message
+        resolved.text = String(message.text[message.text.index(after: newline)...])
+        resolved.replyTo = original.id
+        return resolved
+    }
+
+    /// The same, down a whole thread in order.
+    static func resolvingReplies(_ thread: [NotchHermesChatMessage]) -> [NotchHermesChatMessage] {
+        var resolved: [NotchHermesChatMessage] = []
+        for message in thread { resolved.append(resolvingReply(message, among: resolved)) }
+        return resolved
+    }
+
+    /// The prompt for an agent on this Mac: it reads files by path, so the
+    /// attachments are named under the words.
+    static func prompt(_ words: String, attachments: [URL]) -> String {
+        guard !attachments.isEmpty else { return words }
+        let list = attachments.map { "- " + $0.path }.joined(separator: "\n")
+        let files = "Attached files:\n" + list
+        return words.isEmpty ? files : words + "\n\n" + files
+    }
+
+    static func attachments(_ urls: [URL]) -> [NotchHermesChatMessage.Attachment]? {
+        let list = urls.map { NotchHermesChatMessage.Attachment(path: $0.path, name: $0.lastPathComponent) }
+        return list.isEmpty ? nil : list
+    }
+
+    /// A notification's body: the words, or what was sent without any.
+    static func notificationBody(_ message: NotchHermesChatMessage, image: String, file: String) -> String {
+        let words = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !words.isEmpty { return words }
+        guard let first = message.attachments?.first else { return "" }
+        return first.isImage ? image : "\(file): \(first.name)"
     }
 }
 

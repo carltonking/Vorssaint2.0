@@ -1043,9 +1043,9 @@ enum NotchHermesChatTests {
                      == ["send", "--to", "+15551234567", "--text", "hi; rm -rf ~"],
                      "a message goes to imsg as one argument, never through a shell")
         suite.expect(Support.watchArguments(chatID: 5, number: "+15551234567", after: 12)
-                     == ["watch", "--json", "--reactions", "--chat-id", "5", "--since-rowid", "12"]
+                     == ["watch", "--json", "--reactions", "--attachments", "--chat-id", "5", "--since-rowid", "12"]
                      && Support.watchArguments(chatID: nil, number: "+15551234567", after: nil)
-                     == ["watch", "--json", "--reactions", "--participants", "+15551234567"],
+                     == ["watch", "--json", "--reactions", "--attachments", "--participants", "+15551234567"],
                      "the watch follows the known thread after the last message, or the number before there is one")
 
         // Settings.

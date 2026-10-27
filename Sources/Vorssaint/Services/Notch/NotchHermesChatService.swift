@@ -233,10 +233,16 @@ final class NotchHermesChatService: ObservableObject {
     /// The island was pinned open for an approval, so it is unpinned when the
     /// last one settles rather than staying open for good.
     private var pinnedForApproval = false
-    /// The latest proactive message's hold; a newer one restarts it.
-    private var messagePinGeneration = 0
     /// The message typed while the turn before it was still writing.
-    private var heldMessage: String?
+    private var heldMessage: Outgoing?
+
+    /// A message waiting to go: its words, its files, and the message it
+    /// answers, when it is a reply.
+    struct Outgoing: Equatable {
+        let words: String
+        var attachments: [URL] = []
+        var replyTo: UUID? = nil
+    }
     /// Where the hub's agent stream was last heard, kept across the clients
     /// a retry or a send after a failure starts, so the new watch resumes
     /// there and a routine's message sent in the gap still arrives. Only
@@ -440,9 +446,12 @@ final class NotchHermesChatService: ObservableObject {
     // MARK: Sending
 
     /// Sends a message, starting the server again if it is not running.
-    func send(_ message: String) {
+    /// `replyTo` makes it an inline reply to that message; `attachments`
+    /// are files sent with it.
+    func send(_ message: String, attachments: [URL] = [], replyTo: UUID? = nil) {
         let words = message.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !words.isEmpty else { return }
+        guard !words.isEmpty || !attachments.isEmpty else { return }
+        let outgoing = Outgoing(words: words, attachments: attachments, replyTo: replyTo)
         guard agent.feature.isAvailable,
               UserDefaults.standard.bool(forKey: agent.enabledKey)
         else { return }
@@ -454,7 +463,8 @@ final class NotchHermesChatService: ObservableObject {
         // cleared: they stay in the conversation with the reason, rather than
         // vanishing and leaving a turn that never ends.
         guard client != nil else {
-            append(NotchHermesChatMessage(role: .person, text: words))
+            append(NotchHermesChatMessage(role: .person, text: words, replyTo: replyTo,
+                                          attachments: NotchAgentReplySupport.attachments(attachments)))
             if case .failed(let failure) = state { append(note(failure)) }
             return
         }
@@ -463,21 +473,24 @@ final class NotchHermesChatService: ObservableObject {
         // VERTUS on this Mac takes one prompt at a time, so a message typed
         // while it writes waits its turn; texts can follow each other freely.
         if working, !carriesMessagesThread {
-            heldMessage = words
+            heldMessage = outgoing
             return
         }
-        beginTurn(words)
+        beginTurn(outgoing)
     }
 
-    private func beginTurn(_ words: String) {
-        let message = NotchHermesChatMessage(role: .person, text: words)
+    private func beginTurn(_ outgoing: Outgoing) {
+        let message = NotchHermesChatMessage(role: .person, text: outgoing.words, replyTo: outgoing.replyTo,
+                                             attachments: NotchAgentReplySupport.attachments(outgoing.attachments))
+        let original = outgoing.replyTo.flatMap { id in messages.first { $0.id == id } }
         unconfirmed.append(message.id)
         messages.append(message)
         messages = HermesACPSupport.trimmed(messages)
         reply = ""
         thinking = ""
         working = true
-        client?.send(words)
+        client?.send(NotchAgentReplySupport.outgoing(outgoing.words, quoting: original?.text),
+                     attachments: outgoing.attachments)
     }
 
     /// Stops the turn in flight. Hermes reports it as `cancelled` and keeps
@@ -578,7 +591,8 @@ final class NotchHermesChatService: ObservableObject {
         case .thread(let thread):
             threadArrived = true
             unconfirmed = []
-            let merged = InstinctMessagesSupport.merged(thread: thread, current: messages)
+            let merged = InstinctMessagesSupport.merged(thread: NotchAgentReplySupport.resolvingReplies(thread),
+                                                        current: messages)
             if merged != messages { messages = merged }
         case .delivered(let message):
             confirm(message)
@@ -594,13 +608,25 @@ final class NotchHermesChatService: ObservableObject {
 
     /// A message of the person's came back from Messages. One sent from here
     /// takes its lasting identity; one sent from the phone joins the thread.
-    private func confirm(_ message: NotchHermesChatMessage) {
-        guard !messages.contains(where: { $0.id == message.id }) else { return }
+    private func confirm(_ received: NotchHermesChatMessage) {
+        guard !messages.contains(where: { $0.id == received.id }) else { return }
+        let message = NotchAgentReplySupport.resolvingReply(received, among: messages)
+        // A file sent from here comes back as a message of its own; the
+        // one already showing it stands for it.
+        if message.text.isEmpty, let files = message.attachments, messages.suffix(12).contains(where: { shown in
+            shown.role == .person && files.allSatisfy { file in
+                shown.attachments?.contains { $0.name == file.name } == true
+            }
+        }) { return }
         if let index = messages.indices.reversed().first(where: {
             unconfirmed.contains(messages[$0].id) && messages[$0].text == message.text
         }) {
             unconfirmed.removeAll { $0 == messages[index].id }
-            messages[index] = message
+            var confirmed = message
+            // What only the island knew: the files sent with it, the reply.
+            confirmed.attachments = confirmed.attachments ?? messages[index].attachments
+            confirmed.replyTo = confirmed.replyTo ?? messages[index].replyTo
+            messages[index] = confirmed
         } else {
             append(message)
         }
@@ -689,6 +715,7 @@ final class NotchHermesChatService: ObservableObject {
     private func append(_ message: NotchHermesChatMessage) {
         messages.append(message)
         messages = HermesACPSupport.trimmed(messages)
+        notifyIfUnseen(message)
         // Every finished reply and unasked message passes through here, so
         // this is the one place that reads them aloud when the speaker is on.
         if NotchHermesVoiceSupport.shouldSpeak(
@@ -749,6 +776,22 @@ final class NotchHermesChatService: ObservableObject {
         notch.open(agent.module, pinned: true, takeFocus: false)
     }
 
+    /// What the agent wrote, as a notification, unless its conversation is
+    /// what is on screen. The island no longer opens for a message; this is
+    /// how one is noticed.
+    private func notifyIfUnseen(_ message: NotchHermesChatMessage) {
+        guard message.role == .hermes || message.role == .proactive,
+              !NotchAgentReachOut.isQuietRoutine(message.source) else { return }
+        let notch = NotchService.shared
+        let onScreen = notch.expanded && notch.selected == agent.module
+            && !(notch.showingSections || notch.showingAppPanel || notch.showingCommandBar)
+        guard !onScreen else { return }
+        let words = FeatureStrings.notchAgentMessaging(L10n.shared.language)
+        NotchAgentNotifier.post(agent: agent, title: strings(L10n.shared.language).title,
+                                body: NotchAgentReplySupport.notificationBody(
+                                    message, image: words.image, file: words.attachment))
+    }
+
     /// VERTUS has something to say, unasked. Nothing waits on it, so unlike
     /// an approval it never pins the island and never takes the page the
     /// person is using: on the conversation the message just lands, on
@@ -769,20 +812,9 @@ final class NotchHermesChatService: ObservableObject {
         case .nudge:
             notch.reactMascot(.perk)
         case .open:
-            notch.reactMascot(.perk)
-            // Opened with the pointer elsewhere, an unpinned island counts as
-            // opened by hover and collapses at once, so the message would
-            // land unseen. It holds open like a notification, then lets go
-            // unless something else (an approval, the user) is keeping it.
-            let wasPinned = notch.pinned
-            notch.open(agent.module, pinned: true, takeFocus: false)
-            guard !wasPinned else { return }
-            messagePinGeneration += 1
-            let generation = messagePinGeneration
-            DispatchQueue.main.asyncAfter(deadline: .now() + NotchAgentReachOut.holdOpen) { [weak self] in
-                guard let self, self.messagePinGeneration == generation, !self.pinnedForApproval else { return }
-                NotchService.shared.pinned = false
-            }
+            // A closed island stays closed: the message's notification is
+            // what tells the person, so nothing pops open over their work.
+            return
         }
     }
 
