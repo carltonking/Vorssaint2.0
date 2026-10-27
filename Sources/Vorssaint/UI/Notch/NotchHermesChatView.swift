@@ -261,7 +261,7 @@ struct NotchHermesChatView: View {
         .overlay {
             if dropTargeted {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                    .strokeBorder(Color.white.opacity(0.6), lineWidth: 2)
                     .allowsHitTesting(false)
             }
         }
@@ -408,7 +408,7 @@ struct NotchHermesChatView: View {
                     .font(.system(size: 11))
                     .lineLimit(2)
                     .truncationMode(.tail)
-                    .foregroundStyle(.white.opacity(0.75))
+                    .foregroundStyle(theirs ? Color.white.opacity(0.75) : Color.black.opacity(0.8))
                     .padding(.horizontal, 10)
                     .padding(.vertical, 6)
                     .background(theirs ? NotchMessagesStyle.theirs : NotchMessagesStyle.mine,
@@ -569,7 +569,7 @@ struct NotchHermesChatView: View {
         VStack(alignment: .leading, spacing: 6) {
             if let target = replyTarget, let original = chat.messages.first(where: { $0.id == target }) {
                 HStack(spacing: 8) {
-                    Rectangle().fill(Color.accentColor).frame(width: 2)
+                    Rectangle().fill(Color.white.opacity(0.6)).frame(width: 2)
                     VStack(alignment: .leading, spacing: 1) {
                         Text(messaging.replyingTo)
                             .font(.system(size: 10, weight: .semibold))
@@ -620,12 +620,6 @@ struct NotchHermesChatView: View {
                         .onSubmit(submit)
                         .padding(.vertical, 6)
                         .accessibilityLabel(text.placeholder)
-                    NotchIconButton(symbol: listening ? "mic.fill" : "mic",
-                                    title: listening ? text.stopDictation : text.dictate,
-                                    selected: listening, action: toggleDictation)
-                        // Refused once, the system will not ask again: the note in
-                        // the conversation says where to allow it.
-                        .disabled(preview || voice.phase == .denied || voice.phase == .requesting)
                     sendButton
                 }
                 .padding(.leading, 11)
@@ -644,7 +638,7 @@ struct NotchHermesChatView: View {
         Button(action: chat.working && !canSend ? { chat.cancel() } : submit) {
             Image(systemName: chat.working && !canSend ? "stop.fill" : "arrow.up")
                 .font(.system(size: 11, weight: .bold))
-                .foregroundStyle(.white)
+                .foregroundStyle(canSend || chat.working ? Color.black : Color.white.opacity(0.6))
                 .frame(width: 24, height: 24)
                 .background(canSend || chat.working ? NotchMessagesStyle.mine : Color.white.opacity(0.15), in: Circle())
                 .contentShape(Circle())
@@ -682,18 +676,6 @@ struct NotchHermesChatView: View {
 
     private var listening: Bool { voice.phase == .listening }
 
-    /// Press to talk, press again (or pause) to send what was heard, as if
-    /// it had been typed.
-    private func toggleDictation() {
-        if voice.phase == .idle { typedBeforeDictation = draft }
-        let typed = typedBeforeDictation
-        voice.toggleDictation(in: chat) { words in
-            draft = ""
-            chat.send(NotchHermesVoiceSupport.draft(typed: typed, dictated: words))
-            typing = true
-        }
-    }
-
     private func submit() {
         let words = trimmedDraft
         guard !words.isEmpty || !pending.isEmpty else { return }
@@ -710,36 +692,10 @@ struct NotchHermesChatView: View {
     }
 }
 
-/// Messages' colours: your blue, the agent's grey.
+/// The island's black and white: your messages light, the agent's dark.
 enum NotchMessagesStyle {
-    static let mine = Color(red: 0.04, green: 0.52, blue: 1.0)
-    static let theirs = Color(white: 0.24)
-}
-
-/// A bubble's outline as Messages draws it: a rounded rectangle, with a
-/// tail curling out of the bottom corner on the sender's side when it is the
-/// last of a run.
-struct NotchMessagesBubbleShape: Shape {
-    let mine: Bool
-    let tail: Bool
-
-    func path(in rect: CGRect) -> Path {
-        let radius = min(17, rect.height / 2)
-        var path = Path(roundedRect: rect, cornerRadius: radius, style: .continuous)
-        guard tail else { return path }
-        var curl = Path()
-        // Drawn for the right side, mirrored for the left.
-        let x = rect.maxX, y = rect.maxY
-        curl.move(to: CGPoint(x: x - 12, y: y - 9))
-        curl.addQuadCurve(to: CGPoint(x: x + 5, y: y), control: CGPoint(x: x - 2, y: y - 1))
-        curl.addQuadCurve(to: CGPoint(x: x - 16, y: y - 2), control: CGPoint(x: x - 6, y: y + 1))
-        curl.closeSubpath()
-        if !mine {
-            curl = curl.applying(CGAffineTransform(translationX: rect.minX + rect.maxX, y: 0).scaledBy(x: -1, y: 1))
-        }
-        path.addPath(curl)
-        return path
-    }
+    static let mine = Color.white.opacity(0.92)
+    static let theirs = Color.white.opacity(0.09)
 }
 
 /// One message as Messages shows it: yours on the right in blue, the agent's
@@ -791,15 +747,15 @@ private struct NotchHermesChatBubble: View {
     private var bubble: some View {
         content
             .font(.system(size: 12))
-            .foregroundStyle(.white)
-            .tint(mine ? Color.white : Color(red: 0.4, green: 0.7, blue: 1.0))
+            .foregroundStyle(mine ? Color.black.opacity(0.88) : Color.white.opacity(0.9))
+            .tint(mine ? Color.black : Color.white)
             .lineSpacing(2)
             .fixedSize(horizontal: false, vertical: true)
             .textSelection(.enabled)
             .padding(.horizontal, 11)
-            .padding(.vertical, 7)
+            .padding(.vertical, 8)
             .background(mine ? NotchMessagesStyle.mine : NotchMessagesStyle.theirs,
-                        in: NotchMessagesBubbleShape(mine: mine, tail: tail))
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             // On the corner away from the bubble's own side, as in
             // Messages, overlapping the edge rather than the words.
             .overlay(alignment: mine ? .topLeading : .topTrailing) { reactionBadge }
@@ -875,7 +831,7 @@ struct NotchTypingBubble: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
-            .background(NotchMessagesStyle.theirs, in: NotchMessagesBubbleShape(mine: false, tail: true))
+            .background(NotchMessagesStyle.theirs, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
