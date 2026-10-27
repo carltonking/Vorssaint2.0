@@ -776,9 +776,10 @@ final class NotchHermesChatService: ObservableObject {
         notch.open(agent.module, pinned: true, takeFocus: false)
     }
 
-    /// What the agent wrote, as a notification, unless its conversation is
-    /// what is on screen. The island no longer opens for a message; this is
-    /// how one is noticed.
+    /// The agent finished writing: unless its conversation is what is on
+    /// screen, its icon shows beside the camera, and a click opens its page.
+    /// The island no longer opens for a message, and no system notification
+    /// is posted.
     private func notifyIfUnseen(_ message: NotchHermesChatMessage) {
         guard message.role == .hermes || message.role == .proactive,
               !NotchAgentReachOut.isQuietRoutine(message.source) else { return }
@@ -786,10 +787,8 @@ final class NotchHermesChatService: ObservableObject {
         let onScreen = notch.expanded && notch.selected == agent.module
             && !(notch.showingSections || notch.showingAppPanel || notch.showingCommandBar)
         guard !onScreen else { return }
-        let words = FeatureStrings.notchAgentMessaging(L10n.shared.language)
-        NotchAgentNotifier.post(agent: agent, title: strings(L10n.shared.language).title,
-                                body: NotchAgentReplySupport.notificationBody(
-                                    message, image: words.image, file: words.attachment))
+        notch.show(NotchNotice(event: .agents, title: strings(L10n.shared.language).title, detail: "",
+                               symbol: agent.module.symbol, chatAgent: agent == .vertus ? "vertus" : "instinct"))
     }
 
     /// VERTUS has something to say, unasked. Nothing waits on it, so unlike

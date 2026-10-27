@@ -56,14 +56,5 @@ enum NotchAgentMessagingTests {
             suite.expect(InstinctMessagesSupport.sendArguments(number: " +1555 ", file: files[1])
                          == ["send", "--to", "+1555", "--file", "/tmp/notes.pdf"], "a file is sent on its own")
         }
-
-        suite.run("agent notifications always have a body") {
-            let words = Message(role: .hermes, text: "  Done.  ")
-            suite.expect(Support.notificationBody(words, image: "Image", file: "Attachment") == "Done.", "the words")
-            let photo = Message(role: .hermes, text: "", attachments: [.init(path: "/x/p.jpg", name: "p.jpg")])
-            suite.expect(Support.notificationBody(photo, image: "Image", file: "Attachment") == "Image", "a picture")
-            let pdf = Message(role: .hermes, text: "", attachments: [.init(path: "/x/r.pdf", name: "r.pdf")])
-            suite.expect(Support.notificationBody(pdf, image: "Image", file: "Attachment") == "Attachment: r.pdf", "a file")
-        }
     }
 }

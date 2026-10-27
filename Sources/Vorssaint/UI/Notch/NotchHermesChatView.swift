@@ -179,7 +179,6 @@ struct NotchHermesChatView: View {
     @ObservedObject private var voice = NotchHermesVoiceService.shared
     @ObservedObject private var l10n = L10n.shared
     @AppStorage private var enabled: Bool
-    @AppStorage private var speakReplies: Bool
     @Environment(\.notchSettingsPreview) private var preview
     @State private var draft = ""
     /// What was typed before the microphone opened, kept in front of the
@@ -206,7 +205,6 @@ struct NotchHermesChatView: View {
         self.size = size
         _chat = ObservedObject(wrappedValue: chat)
         _enabled = AppStorage(wrappedValue: false, chat.agent.enabledKey)
-        _speakReplies = AppStorage(wrappedValue: false, chat.agent.speakRepliesKey)
     }
 
     /// Links in an iMessage thread open as cards; replies from VERTUS on
@@ -274,17 +272,7 @@ struct NotchHermesChatView: View {
             try? await Task.sleep(for: .milliseconds(80))
             typing = true
         }
-        .notchBand(leading: { status }, trailing: {
-            HStack(spacing: 2) {
-                NotchIconButton(symbol: speakReplies ? "speaker.wave.2.fill" : "speaker.slash",
-                                title: text.speakReplies, selected: speakReplies) {
-                    speakReplies.toggle()
-                    if !speakReplies { NotchHermesVoiceService.existing?.stopSpeaking() }
-                }
-                NotchIconButton(symbol: "trash", title: text.clear) { chat.clear() }
-                    .disabled(chat.messages.isEmpty && chat.reply.isEmpty)
-            }
-        })
+        .notchBand(leading: { status })
     }
 
     // MARK: Conversation

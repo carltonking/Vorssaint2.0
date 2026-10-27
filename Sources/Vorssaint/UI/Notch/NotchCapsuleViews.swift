@@ -64,6 +64,33 @@ private extension View {
     }
 }
 
+/// VERTUS's or Instinct's icon, the one their notices wear beside the camera.
+struct NotchChatAgentAvatar: View {
+    let agent: String
+    let side: CGFloat
+
+    private static let images: [String: NSImage] = {
+        var loaded: [String: NSImage] = [:]
+        for name in ["vertus", "instinct"] {
+            if let url = Bundle.main.url(forResource: "\(name)-avatar", withExtension: "png", subdirectory: "Images"),
+               let image = NSImage(contentsOf: url) { loaded[name] = image }
+        }
+        return loaded
+    }()
+
+    var body: some View {
+        if let image = Self.images[agent] {
+            Image(nsImage: image)
+                .resizable()
+                .interpolation(.high)
+                .frame(width: side, height: side)
+                .clipShape(RoundedRectangle(cornerRadius: side * 0.24, style: .continuous))
+        } else {
+            Image(systemName: "bubble.left.fill").font(.system(size: side * 0.7))
+        }
+    }
+}
+
 /// Feedback, a message or a mirrored banner, read from one end to the other.
 struct NotchCapsuleNoticeView: View {
     let notice: NotchNotice
@@ -142,7 +169,10 @@ struct NotchCapsuleNoticeView: View {
         // its reactions are off. A
         // notice about the agent itself wears its mark; warnings and renewals
         // keep a symbol that says what happened.
-        if NotchMascotSupport.isEnabled(), let reaction = notice.mascot {
+        if let agent = notice.chatAgent {
+            let side = min(CapsuleLayout.symbolWidth, CapsuleLayout.artworkSide(geometry))
+            NotchChatAgentAvatar(agent: agent, side: side).frame(width: CapsuleLayout.symbolWidth)
+        } else if NotchMascotSupport.isEnabled(), let reaction = notice.mascot {
             let side = min(CapsuleLayout.symbolWidth, CapsuleLayout.artworkSide(geometry))
             NotchMascotView(look: NotchMascotSupport.look(), mood: NotchService.shared.mascotRestingMood,
                             size: side, reaction: NotchMascotSupport.reacts() ? reaction : nil)

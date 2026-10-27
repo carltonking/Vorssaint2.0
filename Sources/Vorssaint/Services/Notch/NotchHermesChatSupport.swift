@@ -412,14 +412,6 @@ enum NotchAgentReplySupport {
         let list = urls.map { NotchHermesChatMessage.Attachment(path: $0.path, name: $0.lastPathComponent) }
         return list.isEmpty ? nil : list
     }
-
-    /// A notification's body: the words, or what was sent without any.
-    static func notificationBody(_ message: NotchHermesChatMessage, image: String, file: String) -> String {
-        let words = message.text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !words.isEmpty { return words }
-        guard let first = message.attachments?.first else { return "" }
-        return first.isImage ? image : "\(file): \(first.name)"
-    }
 }
 
 /// Where the Hermes command is, and what it needs on its PATH.

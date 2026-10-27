@@ -19,6 +19,9 @@ struct NotchNotice: Equatable {
     /// With the companion on, it takes the symbol's place in the notice and
     /// plays this, so the notice itself is its reaction.
     var mascot: NotchMascotReaction? = nil
+    /// VERTUS or Instinct finished writing ("vertus", "instinct"): the
+    /// notice wears that agent's icon and a click opens its page.
+    var chatAgent: String? = nil
     /// A banner that replaces one still on screen keeps at least its wings,
     /// so a burst of messages does not resize the island with each one.
     var minimumWings = NotchNoticeWings.zero
@@ -2346,7 +2349,10 @@ final class NotchService: ObservableObject {
 
     @discardableResult
     func show(_ incoming: NotchNotice) -> Bool {
-        guard showsSystemFeedback, NotchSupport.routes(incoming.event),
+        // An agent's reply belongs to its own page, not the AI agents
+        // module, so it asks only that the island is on.
+        guard showsSystemFeedback,
+              incoming.chatAgent != nil ? NotchSupport.isEnabled() : NotchSupport.routes(incoming.event),
               NotchSupport.shouldReplace(notice?.event, with: incoming.event, held: noticeExpanded) else { return false }
         noticeWork?.cancel(); noticeWork = nil
         var incoming = incoming
@@ -2394,6 +2400,11 @@ final class NotchService: ObservableObject {
             return
         }
         guard !NotchSupport.opensOnlyFromShortcut() else { dismissNotice(); return }
+        if let agent = selectedNotice.chatAgent {
+            dismissNotice()
+            if agent == "instinct" { showInstinctChat() } else { showHermesChat() }
+            return
+        }
         open(selectedNotice.event == .download ? .downloads : selectedNotice.event == .timer ? .timer
              : selectedNotice.event == .accessory ? .system : selectedNotice.event == .systemNotification ? .notifications
              : selectedNotice.event == .clipboard ? .clipboard : selectedNotice.event == .agents ? .agents
