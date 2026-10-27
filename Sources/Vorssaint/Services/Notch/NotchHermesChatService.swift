@@ -208,6 +208,12 @@ final class NotchHermesChatService: ObservableObject {
     }
     /// The reply being written, kept apart from the transcript until its turn
     /// ends so a tool line can land in the order it happened.
+    /// What is typed in the page's field and not sent yet, with the files
+    /// and reply waiting with it. Kept here rather than in the page, so
+    /// closing the island and opening it again finds them as they were left.
+    @Published var draft = ""
+    @Published var pendingAttachments: [URL] = []
+    @Published var replyTarget: UUID?
     @Published private(set) var reply = ""
     /// Reasoning Hermes streamed for this turn, shown dimmed above the reply.
     @Published private(set) var thinking = ""

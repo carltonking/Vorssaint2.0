@@ -180,7 +180,6 @@ struct NotchHermesChatView: View {
     @ObservedObject private var l10n = L10n.shared
     @AppStorage private var enabled: Bool
     @Environment(\.notchSettingsPreview) private var preview
-    @State private var draft = ""
     /// What was typed before the microphone opened, kept in front of the
     /// words heard so dictating adds to a message instead of replacing it.
     @State private var typedBeforeDictation = ""
@@ -189,9 +188,7 @@ struct NotchHermesChatView: View {
     /// the companion cheer here.
     @State private var cheeredReplies: Int?
     /// The message the next one answers, chosen by swiping it or its Reply.
-    @State private var replyTarget: UUID?
     /// Files waiting to go with the next message.
-    @State private var pending: [URL] = []
     /// The bubble under the pointer, which a two-finger swipe moves.
     @State private var hoveredMessage: UUID?
     @State private var swipedMessage: UUID?
@@ -251,7 +248,7 @@ struct NotchHermesChatView: View {
             for provider in providers {
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
                     guard let url, url.isFileURL else { return }
-                    DispatchQueue.main.async { if !pending.contains(url) { pending.append(url) } }
+                    DispatchQueue.main.async { if !chat.pendingAttachments.contains(url) { chat.pendingAttachments.append(url) } }
                 }
             }
             return true
@@ -265,7 +262,7 @@ struct NotchHermesChatView: View {
         }
         .onChange(of: voice.heard) { _, words in
             guard voice.phase == .listening else { return }
-            draft = NotchHermesVoiceSupport.draft(typed: typedBeforeDictation, dictated: words)
+            chat.draft = NotchHermesVoiceSupport.draft(typed: typedBeforeDictation, dictated: words)
         }
         .task {
             guard !preview else { return }
@@ -356,7 +353,7 @@ struct NotchHermesChatView: View {
             NotchHermesChatBubble(words: message.text, mine: mine, tail: tail, text: text, messaging: messaging,
                                   reactions: message.reactions ?? [], attachments: message.attachments ?? [],
                                   reply: { startReply(to: message.id) },
-                                  edit: mine ? { draft = message.text; typing = true } : nil)
+                                  edit: mine ? { chat.draft = message.text; typing = true } : nil)
                 .accessibilityLabel("\(mine ? text.you : text.title): \(message.text)")
             if !mine { linkCards(message.text) }
         }
@@ -423,7 +420,7 @@ struct NotchHermesChatView: View {
     }
 
     private func startReply(to id: UUID) {
-        replyTarget = id
+        chat.replyTarget = id
         typing = true
     }
 
@@ -555,7 +552,7 @@ struct NotchHermesChatView: View {
 
     private var composer: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if let target = replyTarget, let original = chat.messages.first(where: { $0.id == target }) {
+            if let target = chat.replyTarget, let original = chat.messages.first(where: { $0.id == target }) {
                 HStack(spacing: 8) {
                     Rectangle().fill(Color.white.opacity(0.6)).frame(width: 2)
                     VStack(alignment: .leading, spacing: 1) {
@@ -568,17 +565,17 @@ struct NotchHermesChatView: View {
                             .lineLimit(1)
                     }
                     Spacer(minLength: 0)
-                    NotchIconButton(symbol: "xmark", title: messaging.cancelReply) { replyTarget = nil }
+                    NotchIconButton(symbol: "xmark", title: messaging.cancelReply) { chat.replyTarget = nil }
                 }
                 .frame(height: 30)
                 .padding(.horizontal, 6)
             }
-            if !pending.isEmpty {
+            if !chat.pendingAttachments.isEmpty {
                 ScrollView(.horizontal) {
                     HStack(spacing: 6) {
-                        ForEach(pending, id: \.self) { url in
+                        ForEach(chat.pendingAttachments, id: \.self) { url in
                             NotchPendingAttachment(url: url, remove: messaging.removeAttachment) {
-                                pending.removeAll { $0 == url }
+                                chat.pendingAttachments.removeAll { $0 == url }
                             }
                         }
                     }
@@ -600,7 +597,7 @@ struct NotchHermesChatView: View {
                 .accessibilityLabel(messaging.attach)
                 .disabled(preview)
                 HStack(alignment: .bottom, spacing: 4) {
-                    TextField(listening ? text.listening : text.placeholder, text: $draft, axis: .vertical)
+                    TextField(listening ? text.listening : text.placeholder, text: $chat.draft, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(.system(size: 12))
                         .lineLimit(1...4)
@@ -622,7 +619,7 @@ struct NotchHermesChatView: View {
 
     /// Messages' blue arrow, or a stop while the agent writes.
     @ViewBuilder private var sendButton: some View {
-        let canSend = !trimmedDraft.isEmpty || !pending.isEmpty
+        let canSend = !trimmedDraft.isEmpty || !chat.pendingAttachments.isEmpty
         Button(action: chat.working && !canSend ? { chat.cancel() } : submit) {
             Image(systemName: chat.working && !canSend ? "stop.fill" : "arrow.up")
                 .font(.system(size: 11, weight: .bold))
@@ -651,7 +648,7 @@ struct NotchHermesChatView: View {
         NSApp.activate(ignoringOtherApps: true)
         panel.begin { response in
             if response == .OK {
-                for url in panel.urls where !pending.contains(url) { pending.append(url) }
+                for url in panel.urls where !chat.pendingAttachments.contains(url) { chat.pendingAttachments.append(url) }
             }
             notch.pinned = wasPinned
             typing = true
@@ -659,22 +656,22 @@ struct NotchHermesChatView: View {
     }
 
     private var trimmedDraft: String {
-        draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        chat.draft.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
     private var listening: Bool { voice.phase == .listening }
 
     private func submit() {
         let words = trimmedDraft
-        guard !words.isEmpty || !pending.isEmpty else { return }
+        guard !words.isEmpty || !chat.pendingAttachments.isEmpty else { return }
         // Sent by hand mid-dictation: the microphone closes without sending
         // the same words a second time.
         voice.cancelDictation()
-        draft = ""
-        let files = pending
-        let target = replyTarget
-        pending = []
-        replyTarget = nil
+        chat.draft = ""
+        let files = chat.pendingAttachments
+        let target = chat.replyTarget
+        chat.pendingAttachments = []
+        chat.replyTarget = nil
         chat.send(words, attachments: files, replyTo: target)
         typing = true
     }
